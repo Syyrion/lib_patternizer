@@ -1,0 +1,17 @@
+{
+    "disambiguator": "quantumpack",
+    "name": "quantumpack",
+    "author": "quantum",
+    "version": 1,
+    "priority": -99999.1,
+
+    "dependencies":
+    [
+        {
+            "disambiguator": "ohvrvanilla",
+            "name": "base",
+            "author": "vittorio romeo",
+            "min_version": 1
+        }
+    ]
+}
