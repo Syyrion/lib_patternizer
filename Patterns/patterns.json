@@ -1,0 +1,50 @@
+{
+    // Name of pattern. Every pattern file can support multiple patterns.
+    "example_pattern": {
+        // How often the pattern appears, relative to all other patterns in this file.
+        "weight": 3,
+
+        // Valid number of sides that allows the pattern to spawn.
+        // Ranges are inclusive and unioned.
+        // A single number will include just that one side.
+        // If an empty array is given or if this tag is missing, all sides become valid.
+        "range": [
+            [3, 5],
+            [7, 12]
+        ],
+
+        // An array of paths that define how the pattern looks
+        "path": [
+            {
+                // Absolute pathing
+                // Player positions are absolute in relation to side 0
+                "mode": "abs",
+                
+                // Discrete random mode
+                // Any array within the path is a list of values that can be picked from randomly for the next position
+                "random_mode": "discrete",
+                "path": [2, 4, 2, [0, 2, -1], -2]
+            },
+            {
+                // Relative pathing
+                // Player positions are relative to last position. (The first number is always absolute.)
+                "mode": "rel",
+                
+                // Range random mode
+                // Any array within the path is a range of values that can be picked from randomly for the next position (inclusive)
+                "random_mode": "range",
+                "path": [0, 1, -2, [-2, 2], 0]
+            }
+        ],
+
+        // Amount of times the pattern can be repeated
+        // Set to false to disable repeating
+        "repeat": [1, 2],
+
+        // Pattern offset
+        // If tag is missing or false, pattern offsetting ranges from 0 to the current side count
+        // A single value will make the pattern always have the same offset
+        // A array of two values is a range of offsets that will be picked from randomly (inclusive)
+        "offset": 3
+    }
+}
