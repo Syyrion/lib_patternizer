@@ -36,10 +36,11 @@ local __E = setmetatable({
 	end
 })
 
-
 BagSelector = {
 	items = {},
-	keys = {}
+	keys = {},
+	ix = 0,
+	len = 0
 }
 BagSelector.__index = BagSelector
 
@@ -51,6 +52,7 @@ end
 
 function BagSelector:setItems(...)
 	self.items = {...}
+	self:reset()
 end
 
 function BagSelector:setKeys(...)
@@ -60,24 +62,33 @@ function BagSelector:setKeys(...)
 		if type(t[i]) ~= 'number' then __E(2, 'bk', 'arg')(i, '', 'number') end
 	end
 	self.keys = t
+	self:reset()
+	self:shuffle()
+end
+
+function BagSelector:reset()
+	self.ix = 0
+	self.len = #self.keys
+end
+
+function BagSelector:shuffle()
+	shuffle(self.keys)
+end
+
+function BagSelector:next()
+	self.ix = self.ix + 1
+	local out = self.items[self.keys[self.ix]]
+	if self.ix == self.len then
+		self:shuffle()
+		self.ix = 0
+	end
+	return out
 end
 
 function BagSelector:wrap()
-	local newThread = coroutine.wrap(function (items, keys)
-		local index, len = 0, #keys
-		shuffle(keys)
-		coroutine.yield()
-		while true do
-			index = index + 1
-			coroutine.yield(items[keys[index]])
-			if index == len then
-				index = 0
-				shuffle(keys)
-			end
-		end
-	end)
-	newThread({unpack(self.items)}, {unpack(self.keys)})
-	return newThread
+	return function ()
+		return self:next()
+	end
 end
 
 Patternizer = {
