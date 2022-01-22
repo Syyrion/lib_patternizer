@@ -3,67 +3,6 @@ u_execDependencyScript('library_extbase', 'extbase', 'syyrion', 'common.lua')
 u_execDependencyScript('library_slider', 'slider', 'syyrion', 'master.lua')
 
 --[[
-	* BAG SELECTOR
-]]
-
-BagSelector = {}
-BagSelector.__index = BagSelector
-
-function BagSelector:new(itemTable, ...)
-	local newInst = setmetatable({
-		new = __NEW_CLASS_ERROR
-	}, self)
-	newInst:setKeys(...)
-	newInst:setItems(itemTable or {})
-	return newInst
-end
-
--- Set the table of items.
--- Key value pairs of the table can be of any type.
-function BagSelector:setItems(itemTable)
-	self.items = type(itemTable) == 'table' and itemTable or errorf(2, 'SetItems', 'Argument #1 is not a table.')
-	self:reset()
-end
-
--- Set the list of keys.
--- Keys can be of any type.
-function BagSelector:setKeys(...)
-	self.keys = {...}
-	self:reset()
-	self:shuffle()
-end
-
--- Restarts the selector.
-function BagSelector:reset()
-	self.ix = 0
-	self.len = #self.keys
-end
-
--- Shuffles the keys.
-function BagSelector:shuffle()
-	shuffle(self.keys)
-end
-
--- Gets the next item, reshuffling when the end of the key list is reached.
--- If a key has no corresponding item, returns nil.
-function BagSelector:next()
-	self.ix = self.ix + 1
-	local out = self.items[self.keys[self.ix] or errorf(2, 'NextItem', 'No keys provided.')]
-	if self.ix == self.len then
-		self:shuffle()
-		self.ix = 0
-	end
-	return out
-end
-
--- Returns a function which when called, gets the next item.
-function BagSelector:wrap()
-	return function ()
-		return self:next()
-	end
-end
-
---[[
 	* Patternizer
 ]]
 
@@ -86,25 +25,35 @@ Patternizer.link.__index = Patternizer.link
 -- Links characters to functions so that certain actions are performed when those characters appear in a pattern.
 -- Functions to be linked must have the form: function (side, thickness) end
 Patternizer.link.__call = function (this, _, char, fn)
-	char = type(char) == 'string' and char:len() == 1 and char:match('([%d%a%._])') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
-	local t = type(fn)
-	fn = (t == 'function' or t == 'nil') and errorf(2, 'Link', 'Argument #2 is not a function or nil.')
-	this[char] = fn
+	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
+	this[char] = type(t == 'function') and fn or errorf(2, 'Link', 'Argument #2 is not a function.')
+end
+
+function Patternizer:unlink(char)
+	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
+	this[char] = nil
 end
 
 function Patternizer:new(sides)
 	local newInst = setmetatable({
-		__FLAG_NEXT_PATTERN = true,
-		new = __NEW_CLASS_ERROR,
+		new = NewClassError,
 		link = setmetatable({}, self.link),
 		timeline = Keyframe:new(),
-		bags = setmetatable({}, self.bags),
-		sides = self.sides:new(sides)
+		sides = self.sides:new(sides),
+
+		pattern = {
+			key = {},
+			len = 0,
+			ix = 0,
+			d = {}
+		},
+
 	}, self)
+	newInst.pattern.d.__index = newInst.pattern.d
 	return newInst
 end
 
--- Interprets and generates patterns from strings.
+-- Interprets and generates a pattern from a string.
 -- Any extra parameters are passed to the linked functions.
 function Patternizer:send(str, ...)
 	-- Cut out any uneccesary characters
@@ -335,7 +284,6 @@ function Patternizer:send(str, ...)
 		end
 		lc = lc + 1
 	end
-	return relpivot, reloffset
 end
 
 -- Creates a single ring of walls.
@@ -364,35 +312,74 @@ function Patternizer:horizontal(str, ix, sides, th, ...)
 	while pcall(make, loop) do end
 end
 
--- Sets the default bag.
--- This bag is used whenever a bag hasn't been set for the current side count.
--- The bag should be a function that whenver called, returns a string or function.
--- If the bag returns a function, when this function is called, it must return a string.
-function Patternizer:setDefaultBag(bag)
-	local t = type(bag)
-	bag = (t == 'function' or t == 'nil') and bag or errorf(2, 'SetBag', 'Argument #1 is not a function or nil.')
-	self.bags.default = bag
-end
-
--- Sets a bag for specific side counts.
-function Patternizer:setBag(bag, ...)
-	local t = type(bag)
-	bag = (t == 'function' or t == 'nil') and bag or errorf(2, 'SetBag', 'Argument #1 is not a function or nil.')
-	for ix, side in pairs({...}) do
-		self.bags[type(side) == 'number' and side or errorf(2, 'SetBag', 'Argument #%d is not a number.', ix + 1)] = bag
+-- Begins the pattern sequence.
+-- Once a pattern is completed, the next is spawned.
+function Patternizer:begin()
+	if self.__INT then
+		self.__INT = nil
+		return
 	end
+	local pattern = self.pattern
+
+	pattern.ix = pattern.ix + 1
+
+	local item = (pattern[self.sides:get()] or pattern.d)[pattern.key[pattern.ix] or errorf(2, 'Begin', 'No keys provided.')]
+	local outType = type(item)
+	self:send(outType == 'string' and item or (outType == 'function' and item() or ''))
+
+	if pattern.ix >= pattern.len then
+		shuffle(pattern.key)
+		pattern.ix = 0
+	end
+
+	self.timeline:event(0, nil, self.begin, nil, nil, self)
 end
 
-function Patternizer:addPattern(...)
-	local item = self.bags[self.sides:get()]()
-	local t = type(item)
-	self:send(t == 'string' and item or (t == 'function' and item() or ''), ...)
+-- Stops the pattern sequence.
+-- Any already existing events in the timeline will run to completion.
+-- If the pattern is going to stop, returns true
+function Patternizer:pause()
+	self.__INT = true
+end
+
+
+function Patternizer:assign(key, pattern, side)
+	local pType = type(pattern)
+	if pType ~= 'function' and pType ~= 'string' then errorf(2, 'Assign', 'Argument #2 is not a function or string.') end
+	side = type(side) == 'number' and side or 'd'
+
+	local group = self.pattern[side]
+	if not group then
+		group = setmetatable({}, self.pattern.d)
+		self.pattern[side] = group
+	end
+
+	group[key] = pattern
+end
+
+function Patternizer:unassign(key, side)
+	side = type(side) == 'number' and side or 'd'
+	self.pattern[side][key] = nil
+end
+
+function Patternizer:assignTable(pTable, side)
+	side = type(side) == 'number' and side or 'd'
+	for _, v in pairs(type(pTable) == 'table' and pTable or errorf(2, 'Assign', 'Argument #2 is not a table.')) do
+		local pType = type(v)
+		if pType ~= 'function' and pType ~= 'string' then errorf(2, 'Assign', 'Table contains a non-string/function value.') end
+	end
+	self.pattern[side] = pTable
+end
+
+function Patternizer:key(...)
+	local pattern = self.pattern
+	pattern.key = {...}
+	pattern.len = #pattern.key
+	pattern.ix = 0
+	shuffle(pattern.key)
 end
 
 -- Runs the patternizer.
-function Patternizer:run(mFrameTime, ...)
-	if not self.timeline:isRunning() then
-		self:addPattern(...)
-	end
+function Patternizer:step(mFrameTime)
 	self.timeline:step(mFrameTime)
 end
