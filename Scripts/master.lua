@@ -13,9 +13,9 @@ Patternizer = {
 		['1'] = function (...) cWall(...) end,
 		['o'] = function (...) oWall(...) end,
 		['r'] = function (...) rWall(...) end
-	}, {__index = function () return nop end}),
+	}, {__index = function () return __NOP end}),
 	bags = {__index = function (this)
-		return rawget(this, 'default') or nop
+		return rawget(this, 'default') or __NOP
 	end},
 	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, 'number')
 }
@@ -36,7 +36,7 @@ end
 
 function Patternizer:new(sides)
 	local newInst = setmetatable({
-		new = NewClassError,
+		new = __NEW_CLASS_ERROR,
 		link = setmetatable({}, self.link),
 		timeline = Keyframe:new(),
 		sides = self.sides:new(sides),
@@ -67,7 +67,7 @@ function Patternizer:send(str, ...)
 
 	-- Line counter
 	local lc = 1
-	local sides, abspivot, relpivot, tolerance, mirror
+	local abspivot, relpivot, mirror, reverse, tolerance, sides
 
 	local function randSide() return u_rndInt(0, sides - 1) end
 
@@ -77,27 +77,41 @@ function Patternizer:send(str, ...)
 		abspivot = firstLine[1]:match('^>(.*)')
 		if abspivot then
 			-- Read header information and fallback if needed
-			sides = firstLine[4] or ''
-			sides = sides == '' and self.sides:get() or verifyShape(tonumber(sides) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 4.'))
+			sides = firstLine[6] or ''
+			sides = sides == '' and self.sides:get() or verifyShape(tonumber(sides) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 6.'))
 
 			abspivot = abspivot == '' and randSide() or math.floor(tonumber(abspivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 1.')) % sides
 
-			mirror = firstLine[5] or ''
-			if mirror == '' then
+			mirror = firstLine[3] or ''
+			if mirror == '' or mirror == '?' then
 				mirror = getRandomDir()
 			elseif mirror == 't' then
 				mirror = -1
 			elseif mirror == 'f' then
 				mirror = 1
 			else
-				errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
+				errorf(2, 'SendHeader', 'Value on line 1, section 3 is not "t", "f", "?", "", or nil.')
+			end
+
+			reverse = firstLine[4] or ''
+			if reverse == '' then
+			elseif reverse == 't' then
+				reverse = '~'
+			elseif reverse == 'f' then
+				reverse = ''
+			elseif reverse == '?' then
+				reverse = u_rndInt(0, 1) == 0 and '' or '~'
+			elseif reverse == 'm' then
+				reverse = mirror == 1 and '' or '~'
+			else
+				errorf(2, 'SendHeader', 'Value on line 1, section 4 is not "t", "f", "?", "m", "", or nil.')
 			end
 
 			relpivot = firstLine[2] or ''
 			relpivot = (abspivot + (relpivot == '' and 0 or math.floor(tonumber(relpivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 2.'))) * mirror) % sides
 
-			tolerance = firstLine[3] or ''
-			tolerance = tolerance == '' and 10 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 3.')
+			tolerance = firstLine[5] or ''
+			tolerance = tolerance == '' and 5 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
 
 			lc = lc + 1
 		else
@@ -105,8 +119,9 @@ function Patternizer:send(str, ...)
 			sides = self.sides:get()
 			abspivot = randSide()
 			relpivot = abspivot
-			tolerance = 10
 			mirror = getRandomDir()
+			reverse = ''
+			tolerance = 5
 		end
 	end
 
@@ -114,26 +129,37 @@ function Patternizer:send(str, ...)
 
 	while true do
 		-- Make reference to current line
+
 		local currentLine = lines[lc]
 		-- Exit if end of pattern is reached
-		if not currentLine then break end
+		if not currentLine then
+			if depth > 0 then errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', loops[depth].pos) end
+			return
+		end
 
 		-- Check for looping
 		local leadingChar, remainder = currentLine[1]:match('^([%[%]])(.*)')
 		if leadingChar == '[' then
 			-- Begin a loop
 			-- Find range
-			local a = math.max(math.floor(tonumber(remainder) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 1.', lc)), 1)
+			local a = math.max(math.floor(tonumber(remainder) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 1.', lc)), 0)
 			local b = currentLine[2] or ''
-			b = math.max(math.floor(b == '' and a or tonumber(b) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 2.', lc)), 1)
-			-- Reorder if necessary
-			if a > b then a, b = b, a end
-			-- Add loop object
-			depth = depth + 1
-			loops[depth] = {
-				pos = lc,
-				count = u_rndInt(a, b)
-			}
+			b = b == '' and a or math.max(math.floor(tonumber(b) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 2.', lc)), a)
+			local count = u_rndInt(a, b)
+			if count > 0 then
+				-- If count is greater than 0, add new loop object
+				depth = depth + 1
+				loops[depth] = {
+					pos = lc,
+					count = count
+				}
+			else
+				-- If count equals 0 then skip to next "]"
+				local pos = lc
+				repeat
+					lc = lc + 1
+				until (lines[lc] or errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', pos))[1]:match('^(%]).*')
+			end
 		elseif leadingChar == ']' then
 			-- Exit a loop
 			local currentLoop = loops[depth] or errorf(2, 'SendLoop', 'Unexpected "]" on line %d.', lc)
@@ -159,13 +185,20 @@ function Patternizer:send(str, ...)
 					thickness = secondsToThickness(seconds)
 				else
 					-- Find flag
-					local head, flag, tail = section:match('(.*)([!%*%?])(.*)')
+					local head, flag, tail = section:match('(.-)([!%*%?])(.*)')
 					if flag == '!' then
 						-- Check for extra characters
-						if tail ~= '' then errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc) end
-						-- Assign absolute thickness while subtracting tolerance
-						thickness = (head == '' and THICKNESS or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc)) - tolerance
-						seconds = thicknessToSeconds(thickness)
+						if tail == '!' then
+							-- Assign rotational absolute thickness
+							seconds = SECONDS_PER_PLAYER_ROTATION * (head == '' and 0.5 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
+							thickness = secondsToThickness(seconds)
+						elseif tail == '' then
+							-- Assign raw absolute thickness and subtract tolerance
+							thickness = (head == '' and THICKNESS or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc)) - tolerance
+							seconds = thicknessToSeconds(thickness)
+						else
+							errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc)
+						end
 					elseif flag == '*' then
 						-- Check for extra characters
 						if tail ~= '' then errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc) end
@@ -173,18 +206,18 @@ function Patternizer:send(str, ...)
 						seconds = getIdealDelayInSeconds(sides) * (head == '' and 1 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
 						thickness = secondsToThickness(seconds)
 					elseif flag == '?' then
+						head = (head == '' and 0 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
 						-- Check for tail flags
 						if tail == '' or tail == '-' then
 							-- Assign dynamic thickness for shortest path
-							seconds = getIdealDelayInSeconds(sides) * reloffset
+							seconds = getIdealDelayInSeconds(sides) * (reloffset + head)
 						elseif tail == '+' then
 							-- Assign dynamic thickness for longest path
-							seconds = getIdealDelayInSeconds(sides) * (sides - reloffset)
+							seconds = getIdealDelayInSeconds(sides) * (sides - reloffset + head)
 						else
 							-- No flags found
 							errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc)
 						end
-						seconds = seconds * (head == '' and 1 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
 						thickness = secondsToThickness(seconds)
 					else
 						-- Missing flag
@@ -202,7 +235,7 @@ function Patternizer:send(str, ...)
 					ix = relpivot
 				else
 					-- Find and verify flag
-					local head, flag, tail = section:match('(.*)([!%*])(.*)')
+					local head, flag, tail = section:match('(.-)([!%*])(.*)')
 					if not flag then errorf(2, 'SendPosition', 'Missing flag on line %d, section 4.', lc) end
 					if tail ~= '' then errorf(2, 'SendPosition', 'Extraneous characters found on line %d, section 4.', lc) end
 					-- Set position value
@@ -212,7 +245,7 @@ function Patternizer:send(str, ...)
 			end
 
 			-- * Add to timeline
-			self.timeline:event(0, nil, self.horizontal, nil, nil, self, currentLine[1], ix, sides, thickness + tolerance, ...)
+			self.timeline:eval(0, self.horizontal, self, reverse .. currentLine[1], ix, sides, thickness + tolerance, ...)
 			self.timeline:event(seconds)
 
 			-- * Relative pivot control
@@ -225,41 +258,21 @@ function Patternizer:send(str, ...)
 					-- Save the old position
 					local oldpos = relpivot
 					-- Find flag
-					local head, flag, tail = section:match('^(.-)([!%*%?])(.*)$')
+					local head, flag, tail = section:match('(.-)([!%*%?])(.*)')
 					if not flag then
 						-- Flag is missing
 						errorf(2, 'SendPivot', 'Missing flag on line %d, section 3.', lc)
 					elseif flag == '?' then
 						-- Flag is '?'
 						-- Find secondary flag
-						local rflag, rtail = tail:match('^([!%*%^])(.*)')
+						local rflag, rtail = tail:match('^([!%*])(.*)')
 						if rflag then
-							-- Function to generate a range
-							local function range()
-								-- Read range numbers
-								local a = math.floor(tonumber(head) or errorf(3, 'SendPivot', 'Malformed number on line %d, section 3.', lc))
-								local b = rtail == '' and -a or math.floor(tonumber(rtail) or errorf(3, 'SendPivot', 'Malformed number on line %d, section 3.', lc))
-								-- Reorder if necessary
-								if a > b then a, b = b, a end
-								return a, b
-							end
 							-- Check secondary flag type
-							if rflag == '^' then
-								if head == '' and rtail == '' then
-									-- If both numbers are omitted, pick a random location that isn't the current
-									relpivot = (relpivot + u_rndInt(1, sides - 1) * mirror) % sides
-								else
-									-- Offset the relative pivot while excluding 0
-									local a, b = range()
-									if a == 0 and b == 0 then errorf(2, 'SendPivot', 'Invalid range on line %d, section 3', lc) end
-									local ofs
-									repeat ofs = u_rndInt(a, b) until ofs ~= 0
-									relpivot = (relpivot + ofs * mirror) % sides
-								end
-							else
-								-- Pick random relative to absolute pivot
-								relpivot = ((rflag == '!' and abspivot or relpivot) + u_rndInt(range()) * mirror) % sides
-							end
+							local a = math.floor(tonumber(head) or errorf(3, 'SendPivot', 'Malformed number on line %d, section 3.', lc))
+							local b = rtail == '' and -a or math.floor(tonumber(rtail) or errorf(3, 'SendPivot', 'Malformed number on line %d, section 3.', lc))
+							local s = (b - a) % sides
+							-- Pick random relative to absolute pivot
+							relpivot = ((rflag == '!' and abspivot or relpivot) + u_rndInt(a, a + s) * mirror) % sides
 						else
 							-- Secondary flag is missing
 							-- Check for extra characters
@@ -289,17 +302,18 @@ end
 -- Creates a single ring of walls.
 -- Any extra parameters are passed to the linked functions.
 function Patternizer:horizontal(str, ix, sides, th, ...)
-	sides, ix = type(sides) == 'number' and math.floor(sides) or self.sides:get(), type(ix) == 'number' and math.floor(ix) or 0
-	local limit = ix + sides
 	str = type(str) == 'string' and str or errorf(2, 'Horizontal', 'Argument #1 is not a string.')
+	local reverse, nonLoop, loop = str:match('(~*)([^|]*)|?(.*)')
+	reverse = reverse:len() % 2 * -2 + 1
+
+	sides, ix = type(sides) == 'number' and math.floor(sides) or self.sides:get(), type(ix) == 'number' and math.floor(ix) or 0
+	local limit = ix + sides * reverse
 	local t = {...}
 
-	local nonLoop, loop = str:match('(.*)|(.*)')
-	if not nonLoop then nonLoop, loop = str, '' end
 	local function make(p)
 		p:gsub('[%d%a%._]', function (s)
 			self.link[s](ix % sides, th, unpack(t))
-			ix = ix + 1
+			ix = ix + reverse
 			if ix == limit then error() end
 			return s
 		end)
@@ -314,34 +328,28 @@ end
 
 -- Begins the pattern sequence.
 -- Once a pattern is completed, the next is spawned.
-function Patternizer:begin()
-	if self.__INT then
-		self.__INT = nil
-		return
-	end
+function Patternizer:spawn()
 	local pattern = self.pattern
-
 	pattern.ix = pattern.ix + 1
 
-	local item = (pattern[self.sides:get()] or pattern.d)[pattern.key[pattern.ix] or errorf(2, 'Begin', 'No keys provided.')]
+	local sides = self.sides:get()
+	local defaultTable = pattern.d
+	local patternTable = pattern[sides] or defaultTable
+	local key = pattern.key[pattern.ix] or errorf(2, 'Begin', 'No keys provided.')
+
+	local item = patternTable[key] or defaultTable[key]
 	local outType = type(item)
-	self:send(outType == 'string' and item or (outType == 'function' and item() or ''))
+	self:send(outType == 'string' and item or (outType == 'function' and item(sides, key) or ''))
 
 	if pattern.ix >= pattern.len then
 		shuffle(pattern.key)
 		pattern.ix = 0
 	end
-
-	self.timeline:event(0, nil, self.begin, nil, nil, self)
 end
 
--- Stops the pattern sequence.
--- Any already existing events in the timeline will run to completion.
--- If the pattern is going to stop, returns true
-function Patternizer:pause()
-	self.__INT = true
-end
-
+-- Stops or resumes pattern generation. The timeline will still run.
+function Patternizer:pause() self.__PAUSE = true end
+function Patternizer:resume() self.__PAUSE = nil end
 
 function Patternizer:assign(key, pattern, side)
 	local pType = type(pattern)
@@ -381,5 +389,6 @@ end
 
 -- Runs the patternizer.
 function Patternizer:step(mFrameTime)
+	if not (self.timeline:isRunning() or self.__PAUSE) then self:spawn() end
 	self.timeline:step(mFrameTime)
 end
