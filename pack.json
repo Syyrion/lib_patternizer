@@ -1,9 +1,10 @@
 {
-    "disambiguator": "quantumpack",
-    "name": "quantumpack",
-    "author": "quantum",
-    "version": 1,
-    "priority": -99999.1,
+    "disambiguator": "library_patternizer",
+    "name": "patternizer",
+    "author": "syyrion",
+    // Delay calculations thanks to Quantum
+    "version": 1000,
+    "priority": -104,
 
     "dependencies":
     [
@@ -12,6 +13,18 @@
             "name": "base",
             "author": "vittorio romeo",
             "min_version": 1
-        }
+        },
+        {
+			"disambiguator": "library_extbase",
+			"name": "extbase",
+			"author": "syyrion",
+			"min_version": 1001
+		},
+		{
+			"disambiguator": "library_slider",
+			"name": "slider",
+			"author": "syyrion",
+			"min_version": 2003
+		}
     ]
 }
