@@ -1,7 +1,8 @@
 {
     "disambiguator": "library_patternizer",
     "name": "patternizer",
-    "author": "quantum_syyrion",
+    "author": "syyrion",
+    // Delay calculations thanks to Quantum
     "version": 1000,
     "priority": -104,
 
