@@ -1,3 +1,26 @@
+--[[
+	String based pattern generation for Open Hexagon.
+	https://github.com/vittorioromeo/SSVOpenHexagon
+
+	Copyright (C) 2021 Ricky Cui
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+	Email: cuiricky4@gmail.com
+	GitHub: https://github.com/Syyrion
+]]
+
 u_execDependencyScript('library_extbase', 'extbase', 'syyrion', 'utils.lua')
 u_execDependencyScript('library_extbase', 'extbase', 'syyrion', 'common.lua')
 u_execDependencyScript('library_slider', 'slider', 'syyrion', 'master.lua')
@@ -6,11 +29,28 @@ u_execDependencyScript('library_slider', 'slider', 'syyrion', 'master.lua')
 	* Patternizer
 ]]
 
+-- Creates a single ring of walls.
+
+local function horizontal(bin, sides, thickness, ix, dir, nonloop, loop, stop)
+	local function make(p)
+		p:gsub('[%d%a%._]', function (char)
+			bin[char](ix, thickness)
+			ix = (ix + dir) % sides
+			if ix == stop then error('Force exit gsub') end
+			return char
+		end)
+	end
+
+	if not pcall(make, nonloop) then return end
+
+	if loop:len() == 0 then return end
+
+	while pcall(make, loop) do end
+end
+
 Patternizer = {
 	link = setmetatable({
 		['c'] = function (...) cWall(...) end,
-		['.'] = function (...) cWall(...) end,
-		['1'] = function (...) cWall(...) end,
 		['o'] = function (...) oWall(...) end,
 		['r'] = function (...) rWall(...) end
 	}, {__index = function () return __NOP end}),
@@ -19,6 +59,10 @@ Patternizer = {
 	end},
 	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, 'number')
 }
+
+Patternizer.link['.'] = Patternizer.link.c
+Patternizer.link['1'] = Patternizer.link.c
+
 Patternizer.__index = Patternizer
 Patternizer.link.__index = Patternizer.link
 
@@ -55,17 +99,17 @@ end
 
 -- Interprets and generates a pattern from a string.
 -- Any extra parameters are passed to the linked functions.
-function Patternizer:send(str, ...)
-	-- Cut out any uneccesary characters
+function Patternizer:send(str)
+	-- Cut out any uneccesary characters.
 	str = (type(str) == 'string' and str or errorf(2, 'Send', 'Argument #1 is not a string.')):match('^[%s;]*(.-)[%s;]*$')
 
-	-- Create lines table
+	-- Create lines table.
 	local lines = {}
 	for line in str:gsplit('[%s;]*[\n;][%s;]*') do
 		table.insert(lines, line:gsub('%s', ''):split(','))
 	end
 
-	-- Line counter
+	-- Line counter.
 	local lc = 1
 	local abspivot, relpivot, mirror, reverse, tolerance, sides
 
@@ -74,63 +118,65 @@ function Patternizer:send(str, ...)
 	-- Check if there's a header
 	do
 		local firstLine = lines[lc]
-		abspivot = firstLine[1]:match('^>(.*)')
+		abspivot = firstLine[1]:match('^@(.*)')
 		if abspivot then
-			-- Read header information and fallback if needed
+			-- Determine number of sides.
 			sides = firstLine[6] or ''
 			sides = sides == '' and self.sides:get() or verifyShape(tonumber(sides) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 6.'))
 
+			-- Determine absolute pivot location.
 			abspivot = abspivot == '' and randSide() or math.floor(tonumber(abspivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 1.')) % sides
 
+			-- Determine whether the pattern is mirrored.
 			mirror = firstLine[3] or ''
-			if mirror == '' or mirror == '?' then
-				mirror = getRandomDir()
-			elseif mirror == 't' then
-				mirror = -1
-			elseif mirror == 'f' then
-				mirror = 1
-			else
-				errorf(2, 'SendHeader', 'Value on line 1, section 3 is not "t", "f", "?", "", or nil.')
-			end
+			mirror = (mirror == '' or mirror == '?') and getRandomDir() or (
+				mirror == 't' and -1 or (
+					mirror == 'f' and 1 or errorf(2, 'SendHeader', 'Value on line 1, section 3 is not "t", "f", "?", "", or nil.')
+				)
+			)
 
+			-- Determine whether rows are reversed.
 			reverse = firstLine[4] or ''
-			if reverse == '' then
-			elseif reverse == 't' then
-				reverse = '~'
-			elseif reverse == 'f' then
-				reverse = ''
-			elseif reverse == '?' then
-				reverse = u_rndInt(0, 1) == 0 and '' or '~'
-			elseif reverse == 'm' then
-				reverse = mirror == 1 and '' or '~'
-			else
-				errorf(2, 'SendHeader', 'Value on line 1, section 4 is not "t", "f", "?", "m", "", or nil.')
-			end
+			reverse = (reverse == '' or reverse == 'f') and 1 or (
+				reverse == 't' and -1 or (
+					reverse == 'm' and mirror or (
+						reverse == '?' and getRandomDir() or errorf(2, 'SendHeader', 'Value on line 1, section 4 is not "t", "f", "?", "m", "", or nil.')
+					)
+				)
+			)
 
+			-- Determine relative pivot location.
 			relpivot = firstLine[2] or ''
 			relpivot = (abspivot + (relpivot == '' and 0 or math.floor(tonumber(relpivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 2.'))) * mirror) % sides
 
+			-- Determine tolerance value.
 			tolerance = firstLine[5] or ''
-			tolerance = tolerance == '' and 5 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
+			tolerance = tolerance == '' and 8 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
 
+			-- Increment line counter
 			lc = lc + 1
 		else
-			-- Assign random values
+			-- Assign random/default values
 			sides = self.sides:get()
 			abspivot = randSide()
 			relpivot = abspivot
 			mirror = getRandomDir()
-			reverse = ''
-			tolerance = 5
+			reverse = 1
+			tolerance = 8
 		end
 	end
 
-	local halfSides, reloffset, loops, depth = math.floor(sides / 2), 0, {}, 0
+	local reloffset, loops, depth = 0, {}, 0
+	local floorsides, ceilsides
+	do
+		local halfsides = sides / 2
+		floorsides, ceilsides = math.floor(halfsides), math.ceil(halfsides)
+	end
 
 	while true do
 		-- Make reference to current line
-
 		local currentLine = lines[lc]
+
 		-- Exit if end of pattern is reached
 		if not currentLine then
 			if depth > 0 then errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', loops[depth].pos) end
@@ -244,8 +290,14 @@ function Patternizer:send(str, ...)
 				end
 			end
 
+			-- * Block
+			local reverseflag, nonloop, split, loop = currentLine[1]:match('(~?)([%d%a%._]*)([|%-%+]?)([%d%a%._]*)')
+
 			-- * Add to timeline
-			self.timeline:eval(0, self.horizontal, self, reverse .. currentLine[1], ix, sides, thickness + tolerance, ...)
+			self.timeline:eval(
+				0, horizontal, self.link, sides, thickness, ix, (reverseflag == '~' and -1 or 1) * reverse, nonloop, loop,
+				split == '' or split == '|' and ix or (ix + (split == '-' and floorsides or ceilsides)) % sides
+			)
 			self.timeline:event(seconds)
 
 			-- * Relative pivot control
@@ -258,7 +310,7 @@ function Patternizer:send(str, ...)
 					-- Save the old position
 					local oldpos = relpivot
 					-- Find flag
-					local head, flag, tail = section:match('(.-)([!%*%?])(.*)')
+					local head, flag, tail = section:match('(.-)([!%*%?/])(.*)')
 					if not flag then
 						-- Flag is missing
 						errorf(2, 'SendPivot', 'Missing flag on line %d, section 3.', lc)
@@ -280,6 +332,20 @@ function Patternizer:send(str, ...)
 							-- Pick a random side
 							relpivot = randSide()
 						end
+					elseif flag == '/' then
+						head = (head == '' and 0 or tonumber(head) or errorf(2, 'SendPivot', 'Malformed number on line %d, section 3.', lc))
+						-- Check for tail flags
+						if tail == '' or tail == '-' then
+							-- Add floored half sides
+							relpivot = (relpivot + floorsides) % sides
+						elseif tail == '+' then
+							-- Add ceiled half sides
+							relpivot = (relpivot + ceilsides) % sides
+						else
+							-- No flags found
+							errorf(2, 'SendPivot', 'Extraneous characters found on line %d, section 3.', lc)
+						end
+
 					else
 						-- Flag is '!' or '*'
 						-- Check for extra characters
@@ -291,39 +357,13 @@ function Patternizer:send(str, ...)
 
 					-- Set relative offset to shortest distance between the old and new position
 					local diff = math.abs(relpivot - oldpos)
-					reloffset = diff > halfSides and sides - diff or diff
+					reloffset = diff > floorsides and sides - diff or diff
 				end
 			end
 		end
+		-- Increment line counter
 		lc = lc + 1
 	end
-end
-
--- Creates a single ring of walls.
--- Any extra parameters are passed to the linked functions.
-function Patternizer:horizontal(str, ix, sides, th, ...)
-	str = type(str) == 'string' and str or errorf(2, 'Horizontal', 'Argument #1 is not a string.')
-	local reverse, nonLoop, loop = str:match('(~*)([^|]*)|?(.*)')
-	reverse = reverse:len() % 2 * -2 + 1
-
-	sides, ix = type(sides) == 'number' and math.floor(sides) or self.sides:get(), type(ix) == 'number' and math.floor(ix) or 0
-	local limit = ix + sides * reverse
-	local t = {...}
-
-	local function make(p)
-		p:gsub('[%d%a%._]', function (s)
-			self.link[s](ix % sides, th, unpack(t))
-			ix = ix + reverse
-			if ix == limit then error() end
-			return s
-		end)
-	end
-
-	if not pcall(make, nonLoop) then return end
-
-	if loop:len() == 0 then return end
-
-	while pcall(make, loop) do end
 end
 
 -- Begins the pattern sequence.
