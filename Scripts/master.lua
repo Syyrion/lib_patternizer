@@ -34,7 +34,7 @@ u_execDependencyScript('library_slider', 'slider', 'syyrion', 'master.lua')
 local function horizontal(bin, sides, thickness, ix, dir, nonloop, loop, stop)
 	local function make(p)
 		p:gsub('[%d%a%._]', function (char)
-			bin[char](ix, thickness)
+			(bin[char] or __NOP)(ix, thickness)
 			ix = (ix + dir) % sides
 			if ix == stop then error('Force exit gsub') end
 			return char
@@ -49,64 +49,60 @@ local function horizontal(bin, sides, thickness, ix, dir, nonloop, loop, stop)
 end
 
 Patternizer = {
-	link = setmetatable({
+	generators = {
 		['c'] = function (...) cWall(...) end,
 		['o'] = function (...) oWall(...) end,
 		['r'] = function (...) rWall(...) end
-	}, {__index = function () return __NOP end}),
-	bags = {__index = function (this)
-		return rawget(this, 'default') or __NOP
-	end},
+	},
 	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, 'number')
 }
 
-Patternizer.link['.'] = Patternizer.link.c
-Patternizer.link['1'] = Patternizer.link.c
-
+Patternizer.generators['.'] = Patternizer.generators['c']
+Patternizer.generators['1'] = Patternizer.generators['c']
+Patternizer.generators.__index = Patternizer.generators
 Patternizer.__index = Patternizer
-Patternizer.link.__index = Patternizer.link
 
--- Links characters to functions so that certain actions are performed when those characters appear in a pattern.
--- Functions to be linked must have the form: function (side, thickness) end
-Patternizer.link.__call = function (this, _, char, fn)
-	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
-	this[char] = type(t == 'function') and fn or errorf(2, 'Link', 'Argument #2 is not a function.')
-end
-
-function Patternizer:unlink(char)
-	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
-	this[char] = nil
-end
-
-function Patternizer:new(sides)
+function Patternizer:new(...)
 	local newInst = setmetatable({
 		new = __NEW_CLASS_ERROR,
-		link = setmetatable({}, self.link),
+		generators = setmetatable({}, self.generators),
 		timeline = Keyframe:new(),
-		sides = self.sides:new(sides),
-
+		sides = self.sides:new(),
 		pattern = {
-			key = {},
-			len = 0,
-			ix = 0,
-			d = {}
-		},
-
+			list = {},
+			total = 0,
+			previous = 0
+		}
 	}, self)
-	newInst.pattern.d.__index = newInst.pattern.d
+	newInst:add(...)
 	return newInst
 end
 
--- Interprets and generates a pattern from a string.
--- Any extra parameters are passed to the linked functions.
-function Patternizer:send(str)
-	-- Cut out any uneccesary characters.
-	str = (type(str) == 'string' and str or errorf(2, 'Send', 'Argument #1 is not a string.')):match('^[%s;]*(.-)[%s;]*$')
+-- Links characters to functions so that certain actions are performed when those characters appear in a pattern string.
+-- Functions to be linked must have the form: function (side, thickness) end
+function Patternizer:link(char, fn)
+	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
+	self.generators[char] = type(t == 'function') and fn or errorf(2, 'Link', 'Argument #2 is not a function.')
+end
 
+-- Unlinks a character
+function Patternizer:unlink(char)
+	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
+	self.generators[char] = nil
+end
+
+-- Interprets and generates a pattern from a string.
+-- This function is way too long...
+function Patternizer:send(str)
+	-- Cut out any unnecessary characters.
+	str = (type(str) == 'string' and str or errorf(2, 'Send', 'Argument #1 is not a string.')):gsub('[\r\t ]+', ''):match('^[\n;]*(.-)[\n;]*$')
 	-- Create lines table.
 	local lines = {}
-	for line in str:gsplit('[%s;]*[\n;][%s;]*') do
-		table.insert(lines, line:gsub('%s', ''):split(','))
+	do
+		local pattern = string.rep('([^,]*)', 6, ',?')
+		for line in str:gsplit('[\n;]+') do
+			table.insert(lines, {line:match(pattern)})
+		end
 	end
 
 	-- Line counter.
@@ -121,14 +117,14 @@ function Patternizer:send(str)
 		abspivot = firstLine[1]:match('^@(.*)')
 		if abspivot then
 			-- Determine number of sides.
-			sides = firstLine[6] or ''
+			sides = firstLine[6]
 			sides = sides == '' and self.sides:get() or verifyShape(tonumber(sides) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 6.'))
 
 			-- Determine absolute pivot location.
 			abspivot = abspivot == '' and randSide() or math.floor(tonumber(abspivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 1.')) % sides
 
 			-- Determine whether the pattern is mirrored.
-			mirror = firstLine[3] or ''
+			mirror = firstLine[3]
 			mirror = (mirror == '' or mirror == '?') and getRandomDir() or (
 				mirror == 't' and -1 or (
 					mirror == 'f' and 1 or errorf(2, 'SendHeader', 'Value on line 1, section 3 is not "t", "f", "?", "", or nil.')
@@ -136,7 +132,7 @@ function Patternizer:send(str)
 			)
 
 			-- Determine whether rows are reversed.
-			reverse = firstLine[4] or ''
+			reverse = firstLine[4]
 			reverse = (reverse == '' or reverse == 'f') and 1 or (
 				reverse == 't' and -1 or (
 					reverse == 'm' and mirror or (
@@ -146,11 +142,11 @@ function Patternizer:send(str)
 			)
 
 			-- Determine relative pivot location.
-			relpivot = firstLine[2] or ''
+			relpivot = firstLine[2]
 			relpivot = (abspivot + (relpivot == '' and 0 or math.floor(tonumber(relpivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 2.'))) * mirror) % sides
 
 			-- Determine tolerance value.
-			tolerance = firstLine[5] or ''
+			tolerance = firstLine[5]
 			tolerance = tolerance == '' and 8 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
 
 			-- Increment line counter
@@ -180,6 +176,7 @@ function Patternizer:send(str)
 		-- Exit if end of pattern is reached
 		if not currentLine then
 			if depth > 0 then errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', loops[depth].pos) end
+			self.timeline:eval(0, self.enable, self)
 			return
 		end
 
@@ -189,7 +186,7 @@ function Patternizer:send(str)
 			-- Begin a loop
 			-- Find range
 			local a = math.max(math.floor(tonumber(remainder) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 1.', lc)), 0)
-			local b = currentLine[2] or ''
+			local b = currentLine[2]
 			b = b == '' and a or math.max(math.floor(tonumber(b) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 2.', lc)), a)
 			local count = u_rndInt(a, b)
 			if count > 0 then
@@ -224,7 +221,7 @@ function Patternizer:send(str)
 			-- * Thickness/Delay
 			local thickness, seconds
 			do
-				local section = currentLine[2] or ''
+				local section = currentLine[2]
 				if section == '' then
 					-- Section is empty: set defaults
 					seconds = getIdealDelayInSeconds(sides)
@@ -275,7 +272,7 @@ function Patternizer:send(str)
 			-- * Position
 			local ix
 			do
-				local section = currentLine[4] or ''
+				local section = currentLine[4]
 				if section  == '' then
 					-- Section is empty: set default
 					ix = relpivot
@@ -295,14 +292,14 @@ function Patternizer:send(str)
 
 			-- * Add to timeline
 			self.timeline:eval(
-				0, horizontal, self.link, sides, thickness, ix, (reverseflag == '~' and -1 or 1) * reverse, nonloop, loop,
+				0, horizontal, self.generators, sides, thickness, ix, (reverseflag == '~' and -1 or 1) * reverse, nonloop, loop,
 				split == '' or split == '|' and ix or (ix + (split == '-' and floorsides or ceilsides)) % sides
 			)
 			self.timeline:event(seconds)
 
 			-- * Relative pivot control
 			do
-				local section = currentLine[3] or ''
+				local section = currentLine[3]
 				if section == '' then
 					-- Section is empty: set default
 					reloffset = 0
@@ -341,6 +338,8 @@ function Patternizer:send(str)
 						elseif tail == '+' then
 							-- Add ceiled half sides
 							relpivot = (relpivot + ceilsides) % sides
+						elseif tail == '?' then
+							relpivot = (relpivot + (u_rndInt(0, 1) == 0 and floorsides or ceilsides)) % sides
 						else
 							-- No flags found
 							errorf(2, 'SendPivot', 'Extraneous characters found on line %d, section 3.', lc)
@@ -366,69 +365,68 @@ function Patternizer:send(str)
 	end
 end
 
+
+function Patternizer:disable() self.spawn = __NOP end
+function Patternizer:enable() self.spawn = nil end
+
 -- Begins the pattern sequence.
--- Once a pattern is completed, the next is spawned.
+-- This function is disabled while a pattern exists on the timeline
 function Patternizer:spawn()
-	local pattern = self.pattern
-	pattern.ix = pattern.ix + 1
-
 	local sides = self.sides:get()
-	local defaultTable = pattern.d
-	local patternTable = pattern[sides] or defaultTable
-	local key = pattern.key[pattern.ix] or errorf(2, 'Begin', 'No keys provided.')
-
-	local item = patternTable[key] or defaultTable[key]
-	local outType = type(item)
-	self:send(outType == 'string' and item or (outType == 'function' and item(sides, key) or ''))
-
-	if pattern.ix >= pattern.len then
-		shuffle(pattern.key)
-		pattern.ix = 0
+	local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
+	local pool, ix = {}, 0
+	for i = 1, plistlen do
+		local allow, patternStr = patterns[i](sides)
+		if allow and i ~= exclude then
+			ix = ix + 1
+			pool[ix] = i
+			pool[-ix] = patternStr
+		end
+	end
+	if ix > 0 then
+		local choice = u_rndInt(1, ix)
+		self.pattern.previous = pool[choice]
+		local status, message = pcall(self.send, self, pool[-choice])
+		assert(status, ('[SpawnError] Unable to spawn pattern #%d. Message: %s'):format(pool[choice], message))
+		self:disable()
 	end
 end
 
 -- Stops or resumes pattern generation. The timeline will still run.
-function Patternizer:pause() self.__PAUSE = true end
-function Patternizer:resume() self.__PAUSE = nil end
+function Patternizer:pause() self.pspawn = __NOP end
+function Patternizer:resume() self.pspawn = nil end
 
-function Patternizer:assign(key, pattern, side)
-	local pType = type(pattern)
-	if pType ~= 'function' and pType ~= 'string' then errorf(2, 'Assign', 'Argument #2 is not a function or string.') end
-	side = type(side) == 'number' and side or 'd'
+-- Same as spawn but can be disabled by pause and resume functions
+function Patternizer:pspawn()
+	self:spawn()
+end
 
-	local group = self.pattern[side]
-	if not group then
-		group = setmetatable({}, self.pattern.d)
-		self.pattern[side] = group
+-- Adds patterns
+function Patternizer:add(...)
+	local t, start = {...}, self.pattern.total
+	local len = #t
+	for i = 1, len do
+		local fn = t[i]
+		self.pattern.list[start + i] = type(fn) == 'function' and fn or errorf(2, 'AddPattern', 'Argument #%d is not a function.', i)
 	end
-
-	group[key] = pattern
+	self.pattern.total = start + len
 end
 
-function Patternizer:unassign(key, side)
-	side = type(side) == 'number' and side or 'd'
-	self.pattern[side][key] = nil
-end
-
-function Patternizer:assignTable(pTable, side)
-	side = type(side) == 'number' and side or 'd'
-	for _, v in pairs(type(pTable) == 'table' and pTable or errorf(2, 'Assign', 'Argument #2 is not a table.')) do
-		local pType = type(v)
-		if pType ~= 'function' and pType ~= 'string' then errorf(2, 'Assign', 'Table contains a non-string/function value.') end
+-- Removes all patterns
+function Patternizer:clear()
+	for i = 1, self.pattern.total do
+		self.pattern.list[i] = nil
 	end
-	self.pattern[side] = pTable
+	self.pattern.total = 0
 end
 
-function Patternizer:key(...)
-	local pattern = self.pattern
-	pattern.key = {...}
-	pattern.len = #pattern.key
-	pattern.ix = 0
-	shuffle(pattern.key)
-end
-
--- Runs the patternizer.
+-- Runs the patternizer timeline without spawning patterns
 function Patternizer:step(mFrameTime)
-	if not (self.timeline:isRunning() or self.__PAUSE) then self:spawn() end
 	self.timeline:step(mFrameTime)
+end
+
+-- Runs the patternizer while also spawning patterns
+function Patternizer:run(mFrameTime)
+	self:pspawn()
+	self:step(mFrameTime)
 end
