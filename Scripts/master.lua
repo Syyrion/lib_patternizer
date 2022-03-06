@@ -99,7 +99,7 @@ function Patternizer:send(str)
 	-- Create lines table.
 	local lines = {}
 	do
-		local pattern = string.rep('([^,]*)', 6, ',?')
+		local pattern = '([@%[%]]?)' .. string.rep('([^,]*)', 6, ',?')
 		for line in str:gsplit('[\n;]+') do
 			table.insert(lines, {line:match(pattern)})
 		end
@@ -114,17 +114,17 @@ function Patternizer:send(str)
 	-- Check if there's a header
 	do
 		local firstLine = lines[lc]
-		abspivot = firstLine[1]:match('^@(.*)')
-		if abspivot then
+		if firstLine[1] == '@' then
 			-- Determine number of sides.
-			sides = firstLine[6]
+			sides = firstLine[7]
 			sides = sides == '' and self.sides:get() or verifyShape(tonumber(sides) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 6.'))
 
 			-- Determine absolute pivot location.
+			abspivot = firstLine[2]
 			abspivot = abspivot == '' and randSide() or math.floor(tonumber(abspivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 1.')) % sides
 
 			-- Determine whether the pattern is mirrored.
-			mirror = firstLine[3]
+			mirror = firstLine[4]
 			mirror = (mirror == '' or mirror == '?') and getRandomDir() or (
 				mirror == 't' and -1 or (
 					mirror == 'f' and 1 or errorf(2, 'SendHeader', 'Value on line 1, section 3 is not "t", "f", "?", "", or nil.')
@@ -132,7 +132,7 @@ function Patternizer:send(str)
 			)
 
 			-- Determine whether rows are reversed.
-			reverse = firstLine[4]
+			reverse = firstLine[5]
 			reverse = (reverse == '' or reverse == 'f') and 1 or (
 				reverse == 't' and -1 or (
 					reverse == 'm' and mirror or (
@@ -142,12 +142,12 @@ function Patternizer:send(str)
 			)
 
 			-- Determine relative pivot location.
-			relpivot = firstLine[2]
+			relpivot = firstLine[3]
 			relpivot = (abspivot + (relpivot == '' and 0 or math.floor(tonumber(relpivot) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 2.'))) * mirror) % sides
 
 			-- Determine tolerance value.
-			tolerance = firstLine[5]
-			tolerance = tolerance == '' and 8 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
+			tolerance = firstLine[6]
+			tolerance = tolerance == '' and 4 or tonumber(tolerance) or errorf(2, 'SendHeader', 'Malformed number on line 1, section 5.')
 
 			-- Increment line counter
 			lc = lc + 1
@@ -158,7 +158,7 @@ function Patternizer:send(str)
 			relpivot = abspivot
 			mirror = getRandomDir()
 			reverse = 1
-			tolerance = 8
+			tolerance = 4
 		end
 	end
 
@@ -181,12 +181,11 @@ function Patternizer:send(str)
 		end
 
 		-- Check for looping
-		local leadingChar, remainder = currentLine[1]:match('^([%[%]])(.*)')
-		if leadingChar == '[' then
+		if currentLine[1] == '[' then
 			-- Begin a loop
 			-- Find range
-			local a = math.max(math.floor(tonumber(remainder) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 1.', lc)), 0)
-			local b = currentLine[2]
+			local a = math.max(math.floor(tonumber(currentLine[2]) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 1.', lc)), 0)
+			local b = currentLine[3]
 			b = b == '' and a or math.max(math.floor(tonumber(b) or errorf(2, 'SendLoop', 'Malformed number on line %d, section 2.', lc)), a)
 			local count = u_rndInt(a, b)
 			if count > 0 then
@@ -201,16 +200,17 @@ function Patternizer:send(str)
 				local pos = lc
 				repeat
 					lc = lc + 1
-				until (lines[lc] or errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', pos))[1]:match('^(%]).*')
+				until (lines[lc] or errorf(2, 'SendLoop', 'Unmatched "[" on line %d.', pos))[1] == ']'
 			end
-		elseif leadingChar == ']' then
-			-- Exit a loop
+		elseif currentLine[1] == ']' then
 			local currentLoop = loops[depth] or errorf(2, 'SendLoop', 'Unexpected "]" on line %d.', lc)
 			currentLoop.count = currentLoop.count - 1
 			if currentLoop.count == 0 then
+				-- Exit a loop
 				loops[depth] = nil
 				depth = depth - 1
 			else
+				-- Move back to top
 				lc = currentLoop.pos
 			end
 		else
@@ -221,11 +221,11 @@ function Patternizer:send(str)
 			-- * Thickness/Delay
 			local thickness, seconds
 			do
-				local section = currentLine[2]
+				local section = currentLine[3]
 				if section == '' then
 					-- Section is empty: set defaults
 					seconds = getIdealDelayInSeconds(sides)
-					thickness = secondsToThickness(seconds)
+					thickness = secondsToThickness(seconds) + tolerance
 				else
 					-- Find flag
 					local head, flag, tail = section:match('(.-)([!%*%?])(.*)')
@@ -237,8 +237,8 @@ function Patternizer:send(str)
 							thickness = secondsToThickness(seconds)
 						elseif tail == '' then
 							-- Assign raw absolute thickness and subtract tolerance
-							thickness = (head == '' and THICKNESS or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc)) - tolerance
-							seconds = thicknessToSeconds(thickness)
+							thickness = (head == '' and THICKNESS or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
+							seconds = thicknessToSeconds(thickness - tolerance)
 						else
 							errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc)
 						end
@@ -247,7 +247,7 @@ function Patternizer:send(str)
 						if tail ~= '' then errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc) end
 						-- Assign dynamic thickness
 						seconds = getIdealDelayInSeconds(sides) * (head == '' and 1 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
-						thickness = secondsToThickness(seconds)
+						thickness = secondsToThickness(seconds) + tolerance
 					elseif flag == '?' then
 						head = (head == '' and 0 or tonumber(head) or errorf(2, 'SendThickness', 'Malformed number on line %d, section 2.', lc))
 						-- Check for tail flags
@@ -261,7 +261,7 @@ function Patternizer:send(str)
 							-- No flags found
 							errorf(2, 'SendThickness', 'Extraneous characters found on line %d, section 2.', lc)
 						end
-						thickness = secondsToThickness(seconds)
+						thickness = secondsToThickness(seconds) + tolerance
 					else
 						-- Missing flag
 						errorf(2, 'SendThickness', 'Missing flag on line %d, section 2.', lc)
@@ -272,7 +272,7 @@ function Patternizer:send(str)
 			-- * Position
 			local ix
 			do
-				local section = currentLine[4]
+				local section = currentLine[5]
 				if section  == '' then
 					-- Section is empty: set default
 					ix = relpivot
@@ -288,7 +288,7 @@ function Patternizer:send(str)
 			end
 
 			-- * Block
-			local reverseflag, nonloop, split, loop = currentLine[1]:match('(~?)([%d%a%._]*)([|%-%+]?)([%d%a%._]*)')
+			local reverseflag, nonloop, split, loop = currentLine[2]:match('(~?)([%d%a%._]*)([|%-%+]?)([%d%a%._]*)')
 
 			-- * Add to timeline
 			self.timeline:eval(
@@ -299,7 +299,7 @@ function Patternizer:send(str)
 
 			-- * Relative pivot control
 			do
-				local section = currentLine[3]
+				local section = currentLine[4]
 				if section == '' then
 					-- Section is empty: set default
 					reloffset = 0
