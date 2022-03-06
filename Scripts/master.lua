@@ -86,9 +86,14 @@ function Patternizer:link(char, fn)
 end
 
 -- Unlinks a character
-function Patternizer:unlink(char)
-	char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
-	self.generators[char] = nil
+function Patternizer:unlink(...)
+	local t = {...}
+	local len = #t
+	for i = 1, len do
+		local char = t[i]
+		char = type(char) == 'string' and char:match('^([%d%a%._])$') or errorf(2, 'Link', 'Argument #%d is not an alphanumeric character, period, or underscore.', i)
+		self.generators[char] = nil
+	end
 end
 
 -- Interprets and generates a pattern from a string.
