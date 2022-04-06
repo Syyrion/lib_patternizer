@@ -35,8 +35,8 @@ Patternizer = {
 		['o'] = function (...) oWall(...) end,
 		['r'] = function (...) rWall(...) end
 	},
-	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, Filter.IS_SIDE_COUNT),
-	tolerance = Discrete:new(4, nil, Filter.IS_NOT_NEGATIVE)
+	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, Filter.SIDE_COUNT),
+	tolerance = Discrete:new(4, nil, Filter.NON_NEGATIVE)
 }
 
 Patternizer.link['.'] = Patternizer.link['c']
@@ -243,7 +243,7 @@ INSTRUCTIONS['a'] = INSTRUCTIONS['$abs']
 
 -- Compiles a string into a table.
 function Patternizer.compile(str, restrict)
-	str = (Filter.IS_STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
+	str = (Filter.STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
 	local ix, newProgram, stack = 1, {}, Stack:new()
 	for ins in str:gsplit('[%s]+') do
 		if ins == 'while' or ins == 'for' or ins == 'if' then
@@ -294,7 +294,7 @@ end
 
 -- Interprets a compiled program.
 function Patternizer:interpret(program, ...)
-	if not Filter.IS_TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
+	if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
 	local env, stack = nil, Stack:new()
 	do
 		local sides = self.sides:get()
