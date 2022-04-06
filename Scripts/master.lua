@@ -105,11 +105,10 @@ local function horizontal(link, pos, sides, th, dir, data)
 end
 
 local Stack = {}
+Stack.__index = Stack
 
 function Stack:new()
-	return setmetatable({
-		sp = 1,
-	}, self)
+	return setmetatable({sp = 1}, self)
 end
 
 function Stack:push(n)
@@ -119,7 +118,7 @@ end
 
 function Stack:pop(depth, header, message, ...)
 	self.sp = self.sp - 1
-	return self[self.sp > 0 and self.sp or errorf(depth + 1, header or 'Stack', message or 'Stack underflow.', ...)]
+	return self[self.sp > 0 and self.sp or errorf((depth or 0) + 1, header or 'Stack', message or 'Stack underflow.', ...)]
 end
 
 local INSTRUCTIONS = {
@@ -142,11 +141,12 @@ local INSTRUCTIONS = {
 	['roll'] = function (_, stack)
 		local times = stack:pop()
 		local depth = stack:pop()
-		depth = depth % #stack
+		if depth == 0 then return end
+		depth = depth % stack.sp
 		times = times % depth
 		local buffer = {}
-		for i = 1, depth do buffer[i] = stack:pop() end
-		for i = 1, depth do stack:push(buffer[(i + times) % depth]) end
+		for i = depth - 1, 0, -1 do buffer[i] = stack:pop() end
+		for i = 0, depth - 1 do stack:push(buffer[(i + times) % depth]) end
 	end,
 
 	-- Logic
@@ -156,8 +156,8 @@ local INSTRUCTIONS = {
 	['<='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() <= b) and 1 or 0) end,
 	['>'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() > b) and 1 or 0) end,
 	['>='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() >= b) and 1 or 0) end,
-	['or'] = function (_, stack) stack:push((stack:pop() ~= 0 or stack:pop() ~= 0) and 1 or 0) end,
-	['and'] = function (_, stack) stack:push((stack:pop() ~= 0 and stack:pop() ~= 0) and 1 or 0) end,
+	['or'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 or b ~= 0) and 1 or 0) end,
+	['and'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 and b ~= 0) and 1 or 0) end,
 	['not'] = function (_, stack) stack:push(stack:pop() == 0 and 1 or 0) end,
 
 	-- Control flow
@@ -167,7 +167,7 @@ local INSTRUCTIONS = {
 		if i == 0 then
 			env.pc = jump
 		else
-			stack:push(i)
+			stack:push(i - 1)
 			env.pc = env.pc + 1
 		end
 	end,
@@ -243,7 +243,7 @@ INSTRUCTIONS['a'] = INSTRUCTIONS['$abs']
 
 -- Compiles a string into a table.
 function Patternizer.compile(str, restrict)
-	str = (Filter.IS_STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n')
+	str = (Filter.IS_STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
 	local ix, newProgram, stack = 1, {}, Stack:new()
 	for ins in str:gsplit('[%s]+') do
 		if ins == 'while' or ins == 'for' or ins == 'if' then
@@ -279,7 +279,7 @@ function Patternizer.compile(str, restrict)
 			elseif ins == 'call:' then
 				newProgram[ix] = {ins = ins, data = chars:match('^[%w%._]$') or errorf(2, 'Compilation', 'At instruction %d, "%s" can only accept one function character.', ix, ins)}
 			else
-				newProgram[ix] = INSTRUCTIONS[ins] and (tonumber(ins) or ins) or errorf(2, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
+				newProgram[ix] = INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(2, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
 			end
 		end
 		ix = ix + 1
@@ -324,13 +324,13 @@ function Patternizer:interpret(program, ...)
 			env.pc = env.pc + 1
 		elseif instype == "string" then
 			if INSTRUCTIONS[ins](self, stack, env) then
-				return unpack(stack)
+				return unpack(stack, 1, stack.sp - 1)
 			end
 			env.pc = env.pc + 1
 		elseif instype == 'table' then
 			INSTRUCTIONS[ins.ins](self, stack, env, ins.data)
 		else
-			return unpack(stack)
+			return unpack(stack, 1, stack.sp - 1)
 		end
 	end
 end
