@@ -84,19 +84,20 @@ local function horizontal(link, pos, sides, th, dir, data)
 	local step, ix = sides / data.length, 0
 	dir = dir * data.dir
 	local function make(str, stop)
-		str:gsub(function (char)
-			link[char]((ix + pos) % sides, th)
+		str:gsub('[%w%._]', function (char)
+			(link[char] or __NIL)((ix + pos) % sides, th)
 			ix = ix + dir
 			if ix == stop then error() end
 			return char
 		end)
 	end
 
-	for i = 1, length do
+	for i = 1, data.length do
 		local stop = data[i].d(i * step) * dir
 		if pcall(make, data[i].nl, stop) then
-			if data.l then
-				while pcall(make, data.l, stop) do end
+			local l = data[i].l
+			if l then
+				while pcall(make, l, stop) do end
 			else
 				ix = stop
 			end
@@ -200,7 +201,7 @@ local INSTRUCTIONS = {
 	['rmv'] = function (_, stack, env)
 		local ofs = stack:pop() * env.mirror
 		local aofs = math.abs(ofs)
-		env.rof = aofs > env.hsides and env.sides - env.rof or aofs
+		env.rof = aofs > env.hsides and (env.sides - aofs) or aofs
 		env.rel = (env.rel + ofs) % env.sides
 	end,
 	-- ['a'] = ['$abs']
@@ -216,25 +217,28 @@ local INSTRUCTIONS = {
 
 	-- Timeline functions
 	['h:'] = function (self, stack, env, data)
-		local pos = stack:pop()
 		local th = stack:pop()
+		local pos = stack:pop()
 		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th + env.tolerance, env.mirror, data)
+		env.pc = env.pc + 1
 	end,
 	['sleep'] = function (self, stack) self.timeline:event(stack:pop()) end,
 	['thsleep'] = function (self, stack) self.timeline:event(thicknessToSeconds(stack:pop())) end,
 	['rsleep'] = function (self, stack) self.timeline:event(SECONDS_PER_PLAYER_ROTATION * stack:pop()) end,
 	['p:'] = function (self, stack, env, data)
-		local pos = stack:pop()
 		local th = stack:pop()
+		local pos = stack:pop()
 		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th + env.tolerance, env.mirror, data)
-		self.timeline:event(0, thicknessToSeconds(th))
+		self.timeline:event(thicknessToSeconds(th))
+		env.pc = env.pc + 1
 	end,
-	['call:'] = function (self, stack, _, char)
+	['call:'] = function (self, stack, env, char)
 		local args = {}
 		for i = stack:pop(), 1, -1 do
 			args[i] = stack:pop()
 		end
-		self.timeline:eval(self.link[char], self, unpack(args))
+		self.timeline:eval(0, self.link[char], unpack(args))
+		env.pc = env.pc + 1
 	end
 }
 INSTRUCTIONS['if'] = INSTRUCTIONS['while']
@@ -262,24 +266,28 @@ function Patternizer.compile(str, restrict)
 		else
 			local chars
 			ins, chars = ins:match('^([^:]+:?)(.-)$')
-			if ins == 'h:' or ins == 'p:' then
-				local dir, pattern = chars:match('^(~?)([%w%._|%+%-]-)$')
-				if not dir then errorf(2, 'Compilation', 'Invalid pattern at instruction %d, "%s".', ix, ins) end
-				local data = {}
-				for nonloop, loop, div in pattern:gmatch('[%w%._]*|?[%w%._]*[%+%-]?') do
-					table.insert(data, {
-						nl = nonloop,
-						l = loop:len() > 0 and loop or nil,
-						d = div == '+' and math.ceil or math.floor
-					})
+			if ins then
+				if ins == 'h:' or ins == 'p:' then
+					local dir, pattern = chars:match('^(~?)([%w%._|%+%-]-)$')
+					if not dir then errorf(2, 'Compilation', 'Invalid pattern at instruction %d, "%s".', ix, ins) end
+					local data, init, plen = {}, 1, pattern:len()
+					repeat
+						local _, last, nonloop, loop, div = pattern:find('([%w%._]*)|?([%w%._]*)([%+%-]?)', init)
+						table.insert(data, {
+							nl = nonloop,
+							l = loop:len() > 0 and loop or nil,
+							d = div == '+' and math.ceil or math.floor
+						})
+						init = last + 1
+					until last == plen
+					data.length = #data
+					data.dir = dir == '~' and -1 or 1
+					newProgram[ix] = {ins = ins, data = data}
+				elseif ins == 'call:' then
+					newProgram[ix] = {ins = ins, data = chars:match('^[%w%._]$') or errorf(2, 'Compilation', 'At instruction %d, "%s" can only accept one function character.', ix, ins)}
+				else
+					newProgram[ix] = INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(2, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
 				end
-				data.dir = dir == '~' and -1 or 1
-				data.length = #data
-				newProgram[ix] = {ins = ins, data = data}
-			elseif ins == 'call:' then
-				newProgram[ix] = {ins = ins, data = chars:match('^[%w%._]$') or errorf(2, 'Compilation', 'At instruction %d, "%s" can only accept one function character.', ix, ins)}
-			else
-				newProgram[ix] = INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(2, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
 			end
 		end
 		ix = ix + 1
