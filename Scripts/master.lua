@@ -421,7 +421,7 @@ function Patternizer:interpret(program, ...)
 	return interpret(self, program, INSTRUCTIONS, env, stack, 2)
 end
 
-function Patternizer:permitted(program)
+function Patternizer:restrict(program)
 	if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
 	if not program.restrict then return true end
 	return interpret(nil, program, BASIC_INSTRUCTIONS, {
@@ -450,7 +450,7 @@ function Patternizer:spawn()
 	local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
 	local pool, len = {}, 0
 	for i = 1, plistlen do
-		if patterns[i] ~= exclude and self:permitted(patterns[i]) then
+		if patterns[i] ~= exclude and self:restrict(patterns[i]) then
 			len = len + 1
 			pool[len] = patterns[i]
 		end
