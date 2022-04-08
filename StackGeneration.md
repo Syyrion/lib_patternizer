@@ -1,4 +1,4 @@
-**Patternizer v0.16**
+**Patternizer v0.17**
 
 # Operations
 
@@ -243,18 +243,10 @@ These variables are automatically initialized but can be modified.
 * `s2th`  
   Converts a seconds value to absolute thickness.
 
-* `notol`  
-  Subtracts the tolerance from a value to cancel out its effect.  
-
-  Equivalent to:
-  ```
-  $tolerance -
-  ```
-
 ## Timeline
 
 * `h:<pattern>`  
-  Pops the top two numbers on the stack. The first number is the position; the second is the absolute thickness. Adds a wall creation event to the timeline. The tolerance value is automatically added to the thickness.
+  Pops the top two numbers on the stack. The first number is the position; the second is the absolute thickness. Adds a wall creation event to the timeline. This function does not add the tolerance value to the thickness.
   
 * `sleep`  
   Accepts a duration in seconds and adds a wait event to the timeline.

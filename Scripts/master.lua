@@ -240,13 +240,12 @@ local INSTRUCTIONS = {
 	['lpath'] = function (_, stack, env) stack:push((env.sides - env.rof) * env.idealth) end,
 	['th2s'] = function (_, stack) stack:push(thicknessToSeconds(stack:pop())) end,
 	['s2th'] = function (_, stack) stack:push(secondsToThickness(stack:pop())) end,
-	['notol'] = function (_, stack, env) stack:push(stack:pop() - env.tolerance) end,
 
 	-- Timeline functions
 	['h:'] = function (self, stack, env, data)
 		local th = stack:pop()
 		local pos = stack:pop()
-		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th + env.tolerance, env.mirror, data)
+		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th, env.mirror, data)
 		env.pc = env.pc + 1
 	end,
 	['sleep'] = function (self, stack) self.timeline:event(stack:pop()) end,
@@ -317,7 +316,7 @@ function Patternizer.compile(str)
 	local tokenizer
 
 	local restrictTokenizer = function (ins)
-		newProgram[ix] = BASIC_INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(3, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
+		newProgram[ix] = BASIC_INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(3, 'Compilation', 'Unrecognized or illegal "%s" at instruction %d after #restrict.', ins, ix)
 	end
 
 	local bodyTokenizer = function(ins)
@@ -441,8 +440,8 @@ end
 	* Pattern Organizers
 ]]
 
-function Patternizer:disable() self.spawn = __NIL end
-function Patternizer:enable() self.spawn = nil end
+function Patternizer:disable() print('disable'); self.spawn = __NIL end
+function Patternizer:enable() print('enable'); self.spawn = nil end
 
 -- Begins the pattern sequence.
 -- This function is disabled while a pattern exists on the timeline.
@@ -459,6 +458,7 @@ function Patternizer:spawn()
 		local choice = pool[u_rndInt(1, len)]
 		self:interpret(choice)
 		self.pattern.previous = choice
+		self.timeline:eval(0, self.enable, self)
 		self:disable()
 	end
 end
