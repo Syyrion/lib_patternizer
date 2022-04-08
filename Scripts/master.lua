@@ -79,7 +79,35 @@ function Patternizer:unlink(...)
 	end
 end
 
--- Generates a single row of walls
+
+
+--[[
+	* Stack class
+]]
+
+local Stack = {}
+Stack.__index = Stack
+
+function Stack:new()
+	return setmetatable({sp = 1}, self)
+end
+
+function Stack:push(n)
+	self[self.sp] = n
+	self.sp = self.sp + 1
+end
+
+function Stack:pop(depth, header, message, ...)
+	self.sp = self.sp - 1
+	return self[self.sp > 0 and self.sp or errorf((depth or 0) + 1, header or 'Stack', message or 'Stack underflow.', ...)]
+end
+
+
+
+--[[
+	* Wall generator
+	Creates a single row of walls
+]]
 local function horizontal(link, pos, sides, th, dir, data)
 	local step, ix = sides / data.length, 0
 	dir = dir * data.dir
@@ -105,24 +133,14 @@ local function horizontal(link, pos, sides, th, dir, data)
 	end
 end
 
-local Stack = {}
-Stack.__index = Stack
 
-function Stack:new()
-	return setmetatable({sp = 1}, self)
-end
 
-function Stack:push(n)
-	self[self.sp] = n
-	self.sp = self.sp + 1
-end
+--[[
+	* Instructions
+]]
 
-function Stack:pop(depth, header, message, ...)
-	self.sp = self.sp - 1
-	return self[self.sp > 0 and self.sp or errorf((depth or 0) + 1, header or 'Stack', message or 'Stack underflow.', ...)]
-end
-
-local INSTRUCTIONS = {
+-- Instuctions available only after the #restrict instruction
+local BASIC_INSTRUCTIONS = {
 	-- Math
 	['+'] = function (_, stack) stack:push(stack:pop() + stack:pop()) end,
 	['-'] = function (_, stack) local b = stack:pop(); stack:push(stack:pop() - b) end,
@@ -131,8 +149,28 @@ local INSTRUCTIONS = {
 	['%'] = function (_, stack) local b = stack:pop(); stack:push(stack:pop() % b) end,
 	['floor'] = function (_, stack) stack:push(math.floor(stack:pop())) end,
 	['ceil'] = function (_, stack) stack:push(math.ceil(stack:pop())) end,
-	['rnd'] = function (_, stack) local b = stack:pop(); stack:push(u_rndInt(stack:pop(), b)) end,
 	['abs'] = function (_, stack) stack:push(math.abs(stack:pop(pc))) end,
+
+	-- Logic
+	['=='] = function (_, stack) stack:push((stack:pop() == stack:pop()) and 1 or 0) end,
+	['!='] = function (_, stack) stack:push((stack:pop() ~= stack:pop()) and 1 or 0) end,
+	['<'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() < b) and 1 or 0) end,
+	['<='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() <= b) and 1 or 0) end,
+	['>'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() > b) and 1 or 0) end,
+	['>='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() >= b) and 1 or 0) end,
+	['or'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 or b ~= 0) and 1 or 0) end,
+	['and'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 and b ~= 0) and 1 or 0) end,
+	['not'] = function (_, stack) stack:push(stack:pop() == 0 and 1 or 0) end,
+
+	-- Constants
+	['$sides'] = function (_, stack, env) stack:push(env.sides) end
+}
+BASIC_INSTRUCTIONS.__index = BASIC_INSTRUCTIONS
+
+-- The full set of instructions
+local INSTRUCTIONS = {
+	-- Random function
+	['rnd'] = function (_, stack) local b = stack:pop(); stack:push(u_rndInt(stack:pop(), b)) end,
 
 	-- Stack operations
 	['dup'] = function (_, stack) local n = stack:pop(); stack:push(n); stack:push(n) end,
@@ -150,17 +188,6 @@ local INSTRUCTIONS = {
 		for i = 0, depth - 1 do stack:push(buffer[(i + times) % depth]) end
 	end,
 
-	-- Logic
-	['=='] = function (_, stack) stack:push((stack:pop() == stack:pop()) and 1 or 0) end,
-	['!='] = function (_, stack) stack:push((stack:pop() ~= stack:pop()) and 1 or 0) end,
-	['<'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() < b) and 1 or 0) end,
-	['<='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() <= b) and 1 or 0) end,
-	['>'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() > b) and 1 or 0) end,
-	['>='] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() >= b) and 1 or 0) end,
-	['or'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 or b ~= 0) and 1 or 0) end,
-	['and'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 and b ~= 0) and 1 or 0) end,
-	['not'] = function (_, stack) stack:push(stack:pop() == 0 and 1 or 0) end,
-
 	-- Control flow
 	['while'] = function (_, stack, env, jump) env.pc = stack:pop() == 0 and jump or env.pc + 1 end,
 	['for'] = function (_, stack, env, jump)
@@ -176,9 +203,9 @@ local INSTRUCTIONS = {
 	['else'] = function (_, _, env, jump) env.pc = jump end,
 	-- ['end'] = ['else'],
 	['return'] = __TRUE,
+	['#restrict'] = __TRUE,
 
 	-- Constants
-	['$sides'] = function (_, stack, env) stack:push(env.sides) end,
 	['$hsides'] = function (_, stack, env) stack:push(env.hsides) end,
 	['$th'] = function (_, stack) stack:push(THICKNESS) end,
 	['$idealth'] = function (_, stack, env) stack:push(env.idealth) end,
@@ -245,108 +272,174 @@ INSTRUCTIONS['if'] = INSTRUCTIONS['while']
 INSTRUCTIONS['end'] = INSTRUCTIONS['else']
 INSTRUCTIONS['a'] = INSTRUCTIONS['$abs']
 
+setmetatable(INSTRUCTIONS, BASIC_INSTRUCTIONS)
+
+
+
+--[[
+	* Compilers
+]]
+
+local function decode(dir, pattern)
+	local data, init, plen = {}, 1, pattern:len()
+	repeat
+		local _, last, nonloop, loop, div = pattern:find('([%w%._]*)|?([%w%._]*)([%+%-]?)', init)
+		table.insert(data, {
+			nl = nonloop,
+			l = loop:len() > 0 and loop or nil,
+			d = div == '+' and math.ceil or math.floor
+		})
+		init = last + 1
+	until last == plen
+	data.length = #data
+	data.dir = dir == '~' and -1 or 1
+	return data
+end
+
+function Patternizer:strWall(str, pos, th)
+	local dir, pattern = str:match('^(~?)([%w%._|%+%-]-)$')
+	if not dir then errorf(3, 'WallString', 'Invalid pattern.', ix, ins) end
+	horizontal(
+		self.link,
+		Filter.INTEGER(pos) and pos or errorf(2, 'WallString', 'Argument #2 is not an integer.'),
+		self.sides:get(),
+		Filter.NUMBER(th) and th or errorf(2, 'WallString', 'Argument #3 is not a number.'),
+		1,
+		decode(dir, pattern)
+	)
+end
+
 -- Compiles a string into a table.
-function Patternizer.compile(str, restrict)
+function Patternizer.compile(str)
 	str = (Filter.STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
 	local ix, newProgram, stack = 1, {}, Stack:new()
-	for ins in str:gsplit('[%s]+') do
-		if ins == 'while' or ins == 'for' or ins == 'if' then
+
+	local tokenizer
+
+	local restrictTokenizer = function (ins)
+		newProgram[ix] = BASIC_INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(3, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
+	end
+
+	local bodyTokenizer = function(ins)
+		if ins == '#restrict' then
+			newProgram[ix] = ins
+			newProgram.restrict = ix + 1
+			tokenizer = restrictTokenizer
+		elseif ins == 'while' or ins == 'for' or ins == 'if' then
 			stack:push({type = ins, loc = ix})
 			newProgram[ix] = {ins = ins}
 		elseif ins == 'else' then
-			local top = stack:pop(2, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix)
-			if top.type ~= 'if' then errorf(2, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix) end
+			local top = stack:pop(3, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix)
+			if top.type ~= 'if' then errorf(3, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix) end
 			newProgram[ix] = {ins = ins}
 			newProgram[top.loc].data = ix + 1
 			stack:push({type = ins, loc = ix})
 		elseif ins == 'end' then
-			local top = stack:pop(2, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix)
+			local top = stack:pop(3, 'Compilation', 'Unmatched "%s" at instruction %d', ins, ix)
 			newProgram[ix] = {ins = ins, data = (top.type == 'while' or top.type == 'for') and top.loc or ix + 1}
 			newProgram[top.loc].data = ix + 1
 		else
 			local chars
 			ins, chars = ins:match('^([^:]+:?)(.-)$')
-			if ins then
-				if ins == 'h:' or ins == 'p:' then
-					local dir, pattern = chars:match('^(~?)([%w%._|%+%-]-)$')
-					if not dir then errorf(2, 'Compilation', 'Invalid pattern at instruction %d, "%s".', ix, ins) end
-					local data, init, plen = {}, 1, pattern:len()
-					repeat
-						local _, last, nonloop, loop, div = pattern:find('([%w%._]*)|?([%w%._]*)([%+%-]?)', init)
-						table.insert(data, {
-							nl = nonloop,
-							l = loop:len() > 0 and loop or nil,
-							d = div == '+' and math.ceil or math.floor
-						})
-						init = last + 1
-					until last == plen
-					data.length = #data
-					data.dir = dir == '~' and -1 or 1
-					newProgram[ix] = {ins = ins, data = data}
-				elseif ins == 'call:' then
-					newProgram[ix] = {ins = ins, data = chars:match('^[%w%._]$') or errorf(2, 'Compilation', 'At instruction %d, "%s" can only accept one function character.', ix, ins)}
-				else
-					newProgram[ix] = INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(2, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
-				end
+			if ins == 'h:' or ins == 'p:' then
+				local dir, pattern = chars:match('^(~?)([%w%._|%+%-]-)$')
+				if not dir then errorf(3, 'Compilation', 'Invalid pattern at instruction %d, "%s".', ix, ins) end
+				newProgram[ix] = {ins = ins, data = decode(dir, pattern)}
+			elseif ins == 'call:' then
+				newProgram[ix] = {ins = ins, data = chars:match('^[%w%._]$') or errorf(3, 'Compilation', 'At instruction %d, "%s" can only accept one function character.', ix, ins)}
+			else
+				newProgram[ix] = INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(3, 'Compilation', 'Unrecognized "%s" at instruction %d.', ins, ix)
 			end
 		end
+	end
+
+	tokenizer = bodyTokenizer
+
+	for ins in str:gsplit('[%s]+') do
+		tokenizer(ins)
 		ix = ix + 1
 	end
+
 	if stack.sp > 1 then
 		local top = stack:pop()
 		errorf(2, "Compilation", 'Unmatched "%s" at instruction %d.', top.type, top.loc)
 	end
-	newProgram.restrict = type(restrict) == 'function' and restrict or __TRUE
+
 	return newProgram
 end
 
--- Interprets a compiled program.
-function Patternizer:interpret(program, ...)
-	if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
-	local env, stack = nil, Stack:new()
-	do
-		local sides = self.sides:get()
-		env = {
-			pc = 1,
-			sides = sides,
-			hsides = sides / 2,
-			idealth = getIdealThickness(sides),
-			idealdl = getIdealDelayInSeconds(sides),
-			abs = u_rndInt(0, sides - 1),
-			rel = 0,
-			rof = 0,
-			mirror = getRandomDir(),
-			tolerance = self.tolerance:get(),
-		}
-		local args = {...}
-		for i = 1, #args do
-			stack:push(args[i])
-		end
-	end
 
-	while true do
+
+--[[
+	* Interpreters
+]]
+
+local INSTRUCTION_LIMIT = 1048575
+
+local function interpret(self, program, instructionSet, env, stack, errlvl)
+	for _ = 1, INSTRUCTION_LIMIT do
 		local ins = program[env.pc]
 		local instype = type(ins);
 		if instype == 'number' then
 			stack:push(ins)
 			env.pc = env.pc + 1
 		elseif instype == "string" then
-			if INSTRUCTIONS[ins](self, stack, env) then
+			if instructionSet[ins](self, stack, env) then
 				return unpack(stack, 1, stack.sp - 1)
 			end
 			env.pc = env.pc + 1
 		elseif instype == 'table' then
-			INSTRUCTIONS[ins.ins](self, stack, env, ins.data)
+			instructionSet[ins.ins](self, stack, env, ins.data)
 		else
 			return unpack(stack, 1, stack.sp - 1)
 		end
 	end
+	errorf(errlvl + 1, 'Runtime', 'Instruction limit of %d reached.', INSTRUCTION_LIMIT)
+end
+
+-- Interprets a compiled program.
+function Patternizer:interpret(program, ...)
+	if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
+	local env, stack = nil, Stack:new()
+	local sides = self.sides:get()
+	env = {
+		pc = 1,
+		sides = sides,
+		hsides = sides / 2,
+		idealth = getIdealThickness(sides),
+		idealdl = getIdealDelayInSeconds(sides),
+		abs = u_rndInt(0, sides - 1),
+		rel = 0,
+		rof = 0,
+		mirror = getRandomDir(),
+		tolerance = self.tolerance:get(),
+	}
+	local args = {...}
+	for i = 1, #args do
+		stack:push(args[i])
+	end
+	return interpret(self, program, INSTRUCTIONS, env, stack, 2)
+end
+
+function Patternizer:permitted(program)
+	if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
+	if not program.restrict then return true end
+	return interpret(nil, program, BASIC_INSTRUCTIONS, {
+		pc = program.restrict,
+		sides = self.sides:get()
+	}, Stack:new(), 2) ~= 0
 end
 
 -- Directly interprets a string.
 function Patternizer:send(str, ...)
 	return self:interpret(self.compile(str), ...)
 end
+
+
+
+--[[
+	* Pattern Organizers
+]]
 
 function Patternizer:disable() self.spawn = __NIL end
 function Patternizer:enable() self.spawn = nil end
@@ -357,7 +450,7 @@ function Patternizer:spawn()
 	local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
 	local pool, len = {}, 0
 	for i = 1, plistlen do
-		if patterns[i] ~= exclude and patterns[i].restrict(self.sides:get()) then
+		if patterns[i] ~= exclude and self:permitted(patterns[i]) then
 			len = len + 1
 			pool[len] = patterns[i]
 		end
@@ -384,8 +477,7 @@ function Patternizer:add(...)
 	local t, start = {...}, self.pattern.total
 	local len = #t
 	for i = 1, len do
-		local fn = t[i]
-		self.pattern.list[start + i] = type(fn) == 'function' and fn or errorf(2, 'AddPattern', 'Argument #%d is not a function.', i)
+		self.pattern.list[start + i] = self.compile(t[i])
 	end
 	self.pattern.total = start + len
 end
@@ -396,6 +488,7 @@ function Patternizer:clear()
 		self.pattern.list[i] = nil
 	end
 	self.pattern.total = 0
+	self.pattern.previous = nil
 end
 
 -- Runs the patternizer timeline without spawning patterns
