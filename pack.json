@@ -3,7 +3,7 @@
     "name": "patternizer",
     "author": "syyrion",
     // Delay calculations thanks to Quantum
-    "version": 2016,
+    "version": 2017,
     "priority": -104,
 
     "dependencies":
@@ -18,7 +18,7 @@
 			"disambiguator": "library_extbase",
 			"name": "extbase",
 			"author": "syyrion",
-			"min_version": 1101
+			"min_version": 1103
 		},
 		{
 			"disambiguator": "library_slider",
