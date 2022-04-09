@@ -220,7 +220,7 @@ local INSTRUCTIONS = {
 	['$rof'] = function (_, stack, env) stack:push(env.rof) end,
 	['=rof'] = function (_, stack, env) env.rof = stack:pop() end,
 	['$mirror'] = function (_, stack, env) stack:push(env.mirror) end,
-	['=mirror'] = function (_, stack, env) env.mirror = stack:pop() == 0 and 1 or 0 end,
+	['=mirror'] = function (_, stack, env) env.mirror = stack:pop() == 0 and 1 or -1 end,
 	['$tolerance'] = function (_, stack, env) stack:push(env.tolerance) end,
 	['=tolerance'] = function (_, stack, env) env.tolerance = stack:pop() end,
 
@@ -311,6 +311,7 @@ end
 -- Compiles a string into a table.
 function Patternizer.compile(str)
 	str = (Filter.STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
+	if str:len() == 0 then return {} end
 	local ix, newProgram, stack = 1, {}, Stack:new()
 
 	local tokenizer
@@ -440,8 +441,8 @@ end
 	* Pattern Organizers
 ]]
 
-function Patternizer:disable() print('disable'); self.spawn = __NIL end
-function Patternizer:enable() print('enable'); self.spawn = nil end
+function Patternizer:disable() self.spawn = __NIL end
+function Patternizer:enable() self.spawn = nil end
 
 -- Begins the pattern sequence.
 -- This function is disabled while a pattern exists on the timeline.
