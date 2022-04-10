@@ -482,7 +482,7 @@ function Patternizer:add(...)
 	self:addProgram(unpack(t))
 end
 
--- Accepts already compiled 
+-- Accepts already compiled patterns
 function Patternizer:addProgram(...)
 	local t, start = {...}, self.pattern.total
 	local len = #t
