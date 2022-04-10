@@ -3,7 +3,7 @@
     "name": "patternizer",
     "author": "syyrion",
     // Delay calculations thanks to Quantum
-    "version": 2017,
+    "version": 2018,
     "priority": -104,
 
     "dependencies":
