@@ -295,13 +295,13 @@ local function decode(dir, pattern)
 	return data
 end
 
-function Patternizer.strWall(str, pos, th)
+function Patternizer:strWall(str, pos, th)
 	local dir, pattern = str:match('^(~?)([%w%._|%+%-]-)$')
 	if not dir then errorf(3, 'WallString', 'Invalid pattern.', ix, ins) end
 	horizontal(
 		self.link,
 		Filter.INTEGER(pos) and pos or errorf(2, 'WallString', 'Argument #2 is not an integer.'),
-		l_getSides(),
+		self.sides:get(),
 		Filter.NUMBER(th) and th or errorf(2, 'WallString', 'Argument #3 is not a number.'),
 		1,
 		decode(dir, pattern)
@@ -450,9 +450,10 @@ function Patternizer:spawn()
 	local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
 	local pool, len = {}, 0
 	for i = 1, plistlen do
-		if patterns[i] ~= exclude and self:restrict(patterns[i]) then
+		local p = patterns[i]
+		if p ~= exclude and self:restrict(p) then
 			len = len + 1
-			pool[len] = patterns[i]
+			pool[len] = p
 		end
 	end
 	if len > 0 then
