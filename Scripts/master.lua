@@ -295,13 +295,13 @@ local function decode(dir, pattern)
 	return data
 end
 
-function Patternizer:strWall(str, pos, th)
+function Patternizer.strWall(str, pos, th)
 	local dir, pattern = str:match('^(~?)([%w%._|%+%-]-)$')
 	if not dir then errorf(3, 'WallString', 'Invalid pattern.', ix, ins) end
 	horizontal(
 		self.link,
 		Filter.INTEGER(pos) and pos or errorf(2, 'WallString', 'Argument #2 is not an integer.'),
-		self.sides:get(),
+		l_getSides(),
 		Filter.NUMBER(th) and th or errorf(2, 'WallString', 'Argument #3 is not a number.'),
 		1,
 		decode(dir, pattern)
@@ -473,12 +473,22 @@ function Patternizer:pspawn()
 	self:spawn()
 end
 
--- Adds patterns
+-- Adds compiles and patterns
 function Patternizer:add(...)
+	local t = {...}
+	for i = 1, #t do
+		t[i] = self.compile(t[i])
+	end
+	self:addProgram(unpack(t))
+end
+
+-- Accepts already compiled 
+function Patternizer:addProgram(...)
 	local t, start = {...}, self.pattern.total
 	local len = #t
 	for i = 1, len do
-		self.pattern.list[start + i] = self.compile(t[i])
+		local program = t[i]
+		self.pattern.list[start + i] = Filter.TABLE(program) and program or errorf(2, 'AddProgram', 'Argument #%d is not a table.', i)
 	end
 	self.pattern.total = start + len
 end
