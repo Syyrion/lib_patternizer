@@ -418,7 +418,7 @@ function Patternizer:interpret(program, ...)
 		abs = u_rndInt(0, sides - 1),
 		rel = 0,
 		rof = 0,
-		mirror = self.mirroring.get() and getRandomDir() or 1,
+		mirror = self.mirroring:get() and getRandomDir() or 1,
 		tolerance = self.tolerance:get(),
 	}
 	local args = {...}
