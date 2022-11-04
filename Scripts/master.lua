@@ -348,7 +348,7 @@ function Patternizer.compile(str)
 		else
 			local chars
 			ins, chars = ins:match('^([^:]+:?)(.-)$')
-			if ins == 'h:' or ins == 'p:' then
+			if ins == 'h:' or ins == 't:' or ins == 'p:' then
 				local dir, pattern = chars:match('^(~?)([%w%._|%+%-]-)$')
 				if not dir then errorf(3, 'Compilation', 'Invalid pattern at instruction %d, "%s".', ix, ins) end
 				newProgram[ix] = {ins = ins, data = decode(dir, pattern)}
