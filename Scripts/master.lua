@@ -35,8 +35,9 @@ Patternizer = {
 		['o'] = function (...) oWall(...) end,
 		['r'] = function (...) rWall(...) end
 	},
-	sides = Discrete:new(nil, function (self) return self.val or l_getSides() end, Filter.SIDE_COUNT),
-	tolerance = Discrete:new(4, nil, Filter.NON_NEGATIVE)
+	sides = Cascade.new(Filter.SIDE_COUNT, nil, function (self) return self.val or l_getSides() end),
+	mirroring = Cascade.new(Filter.BOOLEAN, true),
+	tolerance = Cascade.new(Filter.NON_NEGATIVE, 4)
 }
 
 Patternizer.link['.'] = Patternizer.link['c']
@@ -50,6 +51,7 @@ function Patternizer:new(...)
 		link = setmetatable({}, self.link),
 		timeline = Keyframe:new(),
 		sides = self.sides:new(),
+		mirroring = self.mirroring:new(),
 		tolerance = self.tolerance:new(),
 		pattern = {
 			list = {},
@@ -64,8 +66,8 @@ end
 -- Functions to be linked must have the form: function (side, thickness) end
 -- Doubles as the table for links
 function Patternizer.link.__call(_, self, char, fn)
-	char = type(char) == 'string' and char:match('^([%w%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
-	self.link[char] = type(t == 'function') and fn or errorf(2, 'Link', 'Argument #2 is not a function.')
+	char = Filter.STRING(char) and char:match('^([%w%._])$') or errorf(2, 'Link', 'Argument #1 is not an alphanumeric character, period, or underscore.')
+	self.link[char] = Filter.FUNCTION(fn) and fn or errorf(2, 'Link', 'Argument #2 is not a function.')
 end
 
 -- Unlinks a character
@@ -74,7 +76,7 @@ function Patternizer:unlink(...)
 	local len = #t
 	for i = 1, len do
 		local char = t[i]
-		char = type(char) == 'string' and char:match('^([%w%._])$') or errorf(2, 'Link', 'Argument #%d is not an alphanumeric character, period, or underscore.', i)
+		char = Filter.STRING(char) and char:match('^([%w%._])$') or errorf(2, 'Link', 'Argument #%d is not an alphanumeric character, period, or underscore.', i)
 		self.link[char] = nil
 	end
 end
@@ -149,7 +151,7 @@ local BASIC_INSTRUCTIONS = {
 	['%'] = function (_, stack) local b = stack:pop(); stack:push(stack:pop() % b) end,
 	['floor'] = function (_, stack) stack:push(math.floor(stack:pop())) end,
 	['ceil'] = function (_, stack) stack:push(math.ceil(stack:pop())) end,
-	['abs'] = function (_, stack) stack:push(math.abs(stack:pop(pc))) end,
+	['abs'] = function (_, stack) stack:push(math.abs(stack:pop())) end,
 
 	-- Logic
 	['=='] = function (_, stack) stack:push((stack:pop() == stack:pop()) and 1 or 0) end,
@@ -199,7 +201,7 @@ local INSTRUCTIONS = {
 			env.pc = env.pc + 1
 		end
 	end,
-	-- ['if'] = ['abs']
+	-- ['if'] = ['while']
 	['else'] = function (_, _, env, jump) env.pc = jump end,
 	-- ['end'] = ['else'],
 	['return'] = __TRUE,
@@ -214,16 +216,11 @@ local INSTRUCTIONS = {
 
 	-- Variables
 	['$abs'] = function (_, stack, env) stack:push(env.abs) end,
-	['=abs'] = function (_, stack, env) env.abs = stack:pop() end,
 	['$rel'] = function (_, stack, env) stack:push(env.rel) end,
-	['=rel'] = function (_, stack, env) env.rel = stack:pop() end,
 	['$rof'] = function (_, stack, env) stack:push(env.rof) end,
-	['=rof'] = function (_, stack, env) env.rof = stack:pop() end,
 	['$mirror'] = function (_, stack, env) stack:push(env.mirror) end,
-	['=mirror'] = function (_, stack, env) env.mirror = stack:pop() == 0 and 1 or -1 end,
 	['$tolerance'] = function (_, stack, env) stack:push(env.tolerance) end,
-	['=tolerance'] = function (_, stack, env) env.tolerance = stack:pop() end,
-
+	
 	-- Position functions
 	['rmv'] = function (_, stack, env)
 		local ofs = stack:pop() * env.mirror
@@ -242,22 +239,9 @@ local INSTRUCTIONS = {
 	['s2th'] = function (_, stack) stack:push(secondsToThickness(stack:pop())) end,
 
 	-- Timeline functions
-	['h:'] = function (self, stack, env, data)
-		local th = stack:pop()
-		local pos = stack:pop()
-		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th, env.mirror, data)
-		env.pc = env.pc + 1
-	end,
 	['sleep'] = function (self, stack) self.timeline:event(stack:pop()) end,
 	['thsleep'] = function (self, stack) self.timeline:event(thicknessToSeconds(stack:pop())) end,
 	['rsleep'] = function (self, stack) self.timeline:event(SECONDS_PER_PLAYER_ROTATION * stack:pop()) end,
-	['p:'] = function (self, stack, env, data)
-		local th = stack:pop()
-		local pos = stack:pop()
-		self.timeline:eval(0, horizontal, self.link, pos, env.sides, th + env.tolerance, env.mirror, data)
-		self.timeline:event(thicknessToSeconds(th))
-		env.pc = env.pc + 1
-	end,
 	['call:'] = function (self, stack, env, char)
 		local args = {}
 		for i = stack:pop(), 1, -1 do
@@ -267,9 +251,28 @@ local INSTRUCTIONS = {
 		env.pc = env.pc + 1
 	end
 }
+
 INSTRUCTIONS['if'] = INSTRUCTIONS['while']
 INSTRUCTIONS['end'] = INSTRUCTIONS['else']
 INSTRUCTIONS['a'] = INSTRUCTIONS['$abs']
+
+local function base(self, stack, env, data, th)
+	local pos = stack:pop()
+	self.timeline:eval(0, horizontal, self.link, pos, env.sides, th, env.mirror, data)
+	env.pc = env.pc + 1
+end
+
+INSTRUCTIONS['h:'] = function (self, stack, env, data)
+	base(self, stack, env, data, stack:pop())
+end
+INSTRUCTIONS['t:'] = function (self, stack, env, data)
+	base(self, stack, env, data, stack:pop() + env.tolerance)
+end
+INSTRUCTIONS['p:'] = function (self, stack, env, data)
+	local th = stack:pop()
+	base(self, stack, env, data, th + env.tolerance)
+	self.timeline:event(thicknessToSeconds(th))
+end
 
 setmetatable(INSTRUCTIONS, BASIC_INSTRUCTIONS)
 
@@ -295,7 +298,7 @@ local function decode(dir, pattern)
 	return data
 end
 
-function Patternizer:strWall(str, pos, th)
+function Patternizer:strwall(str, pos, th)
 	local dir, pattern = str:match('^(~?)([%w%._|%+%-]-)$')
 	if not dir then errorf(3, 'WallString', 'Invalid pattern.', ix, ins) end
 	horizontal(
@@ -307,6 +310,10 @@ function Patternizer:strWall(str, pos, th)
 		decode(dir, pattern)
 	)
 end
+-- ! Legacy name
+Patternizer.strWall = Patternizer.strwall
+
+
 
 -- Compiles a string into a table.
 function Patternizer.compile(str)
@@ -316,15 +323,15 @@ function Patternizer.compile(str)
 
 	local tokenizer
 
-	local restrictTokenizer = function (ins)
+	local restricttokenizer = function (ins)
 		newProgram[ix] = BASIC_INSTRUCTIONS[ins] and ins or tonumber(ins) or errorf(3, 'Compilation', 'Unrecognized or illegal "%s" at instruction %d after #restrict.', ins, ix)
 	end
 
-	local bodyTokenizer = function(ins)
+	local bodytokenizer = function(ins)
 		if ins == '#restrict' then
 			newProgram[ix] = ins
 			newProgram.restrict = ix + 1
-			tokenizer = restrictTokenizer
+			tokenizer = restricttokenizer
 		elseif ins == 'while' or ins == 'for' or ins == 'if' then
 			stack:push({type = ins, loc = ix})
 			newProgram[ix] = {ins = ins}
@@ -353,7 +360,7 @@ function Patternizer.compile(str)
 		end
 	end
 
-	tokenizer = bodyTokenizer
+	tokenizer = bodytokenizer
 
 	for ins in str:gsplit('[%s]+') do
 		tokenizer(ins)
@@ -411,7 +418,7 @@ function Patternizer:interpret(program, ...)
 		abs = u_rndInt(0, sides - 1),
 		rel = 0,
 		rof = 0,
-		mirror = getRandomDir(),
+		mirror = self.mirroring.get() and getRandomDir() or 1,
 		tolerance = self.tolerance:get(),
 	}
 	local args = {...}
@@ -484,7 +491,7 @@ function Patternizer:add(...)
 end
 
 -- Accepts already compiled patterns
-function Patternizer:addProgram(...)
+function Patternizer:addprogram(...)
 	local t, start = {...}, self.pattern.total
 	local len = #t
 	for i = 1, len do
@@ -493,6 +500,8 @@ function Patternizer:addProgram(...)
 	end
 	self.pattern.total = start + len
 end
+-- ! Legacy name
+Patternizer.addProgram = Patternizer.addprogram
 
 -- Removes all patterns
 function Patternizer:clear()
