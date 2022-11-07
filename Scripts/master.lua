@@ -182,9 +182,8 @@ local INSTRUCTIONS = {
 	['roll'] = function (_, stack)
 		local times = stack:pop()
 		local depth = stack:pop()
-		if depth == 0 then return end
+		if depth == 0 or times == 0 then return end
 		depth = depth % stack.sp
-		times = times % depth
 		local buffer = {}
 		for i = depth - 1, 0, -1 do buffer[i] = stack:pop() end
 		for i = 0, depth - 1 do stack:push(buffer[(i + times) % depth]) end
