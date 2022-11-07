@@ -15,16 +15,16 @@
             "min_version": 1
         },
         {
-			"disambiguator": "library_extbase",
-			"name": "extbase",
-			"author": "syyrion",
-			"min_version": 1103
-		},
-		{
-			"disambiguator": "library_slider",
-			"name": "slider",
-			"author": "syyrion",
-			"min_version": 2006
-		}
+            "disambiguator": "library_extbase",
+            "name": "extbase",
+            "author": "syyrion",
+            "min_version": 1103
+        },
+        {
+            "disambiguator": "library_slider",
+            "name": "slider",
+            "author": "syyrion",
+            "min_version": 2006
+        }
     ]
 }
