@@ -37,6 +37,7 @@ Patternizer = {
     },
     sides = Cascade.new(Filter.SIDE_COUNT, nil, function (self) return self.val or l_getSides() end),
     mirroring = Cascade.new(Filter.BOOLEAN, true),
+    randsideinit = Cascade.new(Filter.BOOLEAN, true),
     tolerance = Cascade.new(Filter.NON_NEGATIVE, 4)
 }
 
@@ -52,6 +53,7 @@ function Patternizer:new(...)
         timeline = Keyframe:new(),
         sides = self.sides:new(),
         mirroring = self.mirroring:new(),
+        randsideinit = self.randsideinit:new(),
         tolerance = self.tolerance:new(),
         pattern = {
             list = {},
@@ -206,26 +208,31 @@ local INSTRUCTIONS = {
     ['return'] = __TRUE,
     ['#restrict'] = __TRUE,
 
-    -- Constants
+    -- Variables
     ['$hsides'] = function (_, stack, env) stack:push(env.hsides) end,
     ['$th'] = function (_, stack) stack:push(THICKNESS) end,
     ['$idealth'] = function (_, stack, env) stack:push(env.idealth) end,
     ['$idealdl'] = function (_, stack, env) stack:push(env.idealdl) end,
     ['$sperpr'] = function (_, stack) stack:push(SECONDS_PER_PLAYER_ROTATION) end,
-
-    -- Variables
     ['$abs'] = function (_, stack, env) stack:push(env.abs) end,
     ['$rel'] = function (_, stack, env) stack:push(env.rel) end,
     ['$rof'] = function (_, stack, env) stack:push(env.rof) end,
     ['$mirror'] = function (_, stack, env) stack:push(env.mirror) end,
     ['$tolerance'] = function (_, stack, env) stack:push(env.tolerance) end,
-    
+
     -- Position functions
     ['rmv'] = function (_, stack, env)
         local ofs = stack:pop() * env.mirror
         local aofs = math.abs(ofs)
         env.rof = aofs > env.hsides and (env.sides - aofs) or aofs
         env.rel = (env.rel + ofs) % env.sides
+    end,
+    ['amv'] = function (_, stack, env)
+        local ofs = stack:pop() * env.mirror
+        local old = env.rel
+        env.rel = ofs % env.sides
+        local d = math.abs(env.rel - old)
+        env.rof = d > env.hsides and (env.sides - d) or d
     end,
     -- ['a'] = ['$abs']
     ['r'] = function (_, stack, env) stack:push((env.abs + env.rel) % env.sides) end,
@@ -411,10 +418,10 @@ function Patternizer:interpret(program, ...)
     env = {
         pc = 1,
         sides = sides,
-        hsides = sides / 2,
+        hsides = sides * 0.5,
         idealth = getIdealThickness(sides),
         idealdl = getIdealDelayInSeconds(sides),
-        abs = u_rndInt(0, sides - 1),
+        abs = self.randsideinit:get() and u_rndInt(0, sides - 1) or 0,
         rel = 0,
         rof = 0,
         mirror = self.mirroring:get() and getRandomDir() or 1,
