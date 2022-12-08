@@ -166,8 +166,9 @@ local BASIC_INSTRUCTIONS = {
     ['and'] = function (_, stack) local b = stack:pop(); stack:push((stack:pop() ~= 0 and b ~= 0) and 1 or 0) end,
     ['not'] = function (_, stack) stack:push(stack:pop() == 0 and 1 or 0) end,
 
-    -- Constants
-    ['$sides'] = function (_, stack, env) stack:push(env.sides) end
+    -- Variables
+    ['$sides'] = function (_, stack, env) stack:push(env.sides) end,
+    ['$hsides'] = function (_, stack, env) stack:push(env.hsides) end
 }
 BASIC_INSTRUCTIONS.__index = BASIC_INSTRUCTIONS
 
@@ -209,7 +210,6 @@ local INSTRUCTIONS = {
     ['#restrict'] = __TRUE,
 
     -- Variables
-    ['$hsides'] = function (_, stack, env) stack:push(env.hsides) end,
     ['$th'] = function (_, stack) stack:push(THICKNESS) end,
     ['$idealth'] = function (_, stack, env) stack:push(env.idealth) end,
     ['$idealdl'] = function (_, stack, env) stack:push(env.idealdl) end,
@@ -223,24 +223,26 @@ local INSTRUCTIONS = {
     -- Position functions
     ['rmv'] = function (_, stack, env)
         local ofs = stack:pop() * env.mirror
-        local aofs = math.abs(ofs)
-        env.rof = aofs > env.hsides and (env.sides - aofs) or aofs
-        env.rel = (env.rel + ofs) % env.sides
+        env.rof = (ofs + env.hsides) % env.sides - env.hsides
+        env.rel = (env.rel + env.rof) % env.sides
     end,
     ['amv'] = function (_, stack, env)
         local ofs = stack:pop() * env.mirror
         local old = env.rel
         env.rel = ofs % env.sides
-        local d = math.abs(env.rel - old)
-        env.rof = d > env.hsides and (env.sides - d) or d
+        env.rof = (env.rel - old) * env.mirror
     end,
+    ['sh'] = function (_, stack, env)
+        local b = stack:pop() * env.mirror; stack:push((stack:pop() + b) % env.sides)
+    end,
+
     -- ['a'] = ['$abs']
     ['r'] = function (_, stack, env) stack:push((env.abs + env.rel) % env.sides) end,
 
     -- Thickness functions
     ['i'] = function (_, stack, env) stack:push(stack:pop() * env.idealth) end,
-    ['spath'] = function (_, stack, env) stack:push(env.rof * env.idealth) end,
-    ['lpath'] = function (_, stack, env) stack:push((env.sides - env.rof) * env.idealth) end,
+    ['spath'] = function (_, stack, env) stack:push(math.abs(env.rof) * env.idealth) end,
+    ['lpath'] = function (_, stack, env) stack:push((env.sides - math.abs(env.rof)) * env.idealth) end,
     ['th2s'] = function (_, stack) stack:push(thicknessToSeconds(stack:pop())) end,
     ['s2th'] = function (_, stack) stack:push(secondsToThickness(stack:pop())) end,
 
@@ -255,30 +257,29 @@ local INSTRUCTIONS = {
         end
         self.timeline:eval(0, self.link[char], unpack(args))
         env.pc = env.pc + 1
+    end,
+
+    ['h:'] = function (self, stack, env, data)
+        local th = stack:pop()
+        self.timeline:eval(0, horizontal, self.link, stack:pop(), env.sides, th, env.mirror, data)
+        env.pc = env.pc + 1
+    end,
+    ['t:'] = function (self, stack, env, data)
+        local th = stack:pop()
+        self.timeline:eval(0, horizontal, self.link, stack:pop(), env.sides, th + env.tolerance, env.mirror, data)
+        env.pc = env.pc + 1
+    end,
+    ['p:'] = function (self, stack, env, data)
+        local th = stack:pop()
+        self.timeline:eval(0, horizontal, self.link, stack:pop(), env.sides, th + env.tolerance, env.mirror, data)
+        env.pc = env.pc + 1
+        self.timeline:event(thicknessToSeconds(th))
     end
 }
 
 INSTRUCTIONS['if'] = INSTRUCTIONS['while']
 INSTRUCTIONS['end'] = INSTRUCTIONS['else']
 INSTRUCTIONS['a'] = INSTRUCTIONS['$abs']
-
-local function base(self, stack, env, data, th)
-    local pos = stack:pop()
-    self.timeline:eval(0, horizontal, self.link, pos, env.sides, th, env.mirror, data)
-    env.pc = env.pc + 1
-end
-
-INSTRUCTIONS['h:'] = function (self, stack, env, data)
-    base(self, stack, env, data, stack:pop())
-end
-INSTRUCTIONS['t:'] = function (self, stack, env, data)
-    base(self, stack, env, data, stack:pop() + env.tolerance)
-end
-INSTRUCTIONS['p:'] = function (self, stack, env, data)
-    local th = stack:pop()
-    base(self, stack, env, data, th + env.tolerance)
-    self.timeline:event(thicknessToSeconds(th))
-end
 
 setmetatable(INSTRUCTIONS, BASIC_INSTRUCTIONS)
 
@@ -323,7 +324,7 @@ Patternizer.strWall = Patternizer.strwall
 
 -- Compiles a string into a table.
 function Patternizer.compile(str)
-    str = (Filter.STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//.*\n', '\n'):match('^%s*(.-)%s*$')
+    str = (Filter.STRING(str) and str or errorf(2, 'Compilation', 'Argument #1 is not a string.')):gsub('//[^\n]*', ''):match('^%s*(.-)%s*$')
     if str:len() == 0 then return {} end
     local ix, newProgram, stack = 1, {}, Stack:new()
 
