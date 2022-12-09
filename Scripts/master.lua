@@ -232,8 +232,11 @@ local INSTRUCTIONS = {
         env.rel = ofs % env.sides
         env.rof = (env.rel - old) * env.mirror
     end,
-    ['sh'] = function (_, stack, env)
+    ['>>'] = function (_, stack, env)
         local b = stack:pop() * env.mirror; stack:push((stack:pop() + b) % env.sides)
+    end,
+    ['<<'] = function (_, stack, env)
+        local b = stack:pop() * env.mirror; stack:push((stack:pop() - b) % env.sides)
     end,
 
     -- ['a'] = ['$abs']

@@ -3,7 +3,7 @@
     "name": "patternizer",
     "author": "syyrion",
     // Delay calculations thanks to Quantum
-    "version": 2022,
+    "version": 2023,
     "priority": -104,
 
     "dependencies":
