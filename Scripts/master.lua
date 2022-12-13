@@ -154,6 +154,7 @@ local BASIC_INSTRUCTIONS = {
     ['floor'] = function (_, stack) stack:push(math.floor(stack:pop())) end,
     ['ceil'] = function (_, stack) stack:push(math.ceil(stack:pop())) end,
     ['abs'] = function (_, stack) stack:push(math.abs(stack:pop())) end,
+    ['sgn'] = function (_, stack) stack:push(getSign(stack:pop())) end,
 
     -- Logic
     ['=='] = function (_, stack) stack:push((stack:pop() == stack:pop()) and 1 or 0) end,
@@ -222,9 +223,9 @@ local INSTRUCTIONS = {
 
     -- Position functions
     ['rmv'] = function (_, stack, env)
-        local ofs = stack:pop() * env.mirror
+        local ofs = stack:pop()
         env.rof = (ofs + env.hsides) % env.sides - env.hsides
-        env.rel = (env.rel + env.rof) % env.sides
+        env.rel = (env.rel + ofs * env.mirror) % env.sides
     end,
     ['amv'] = function (_, stack, env)
         local ofs = stack:pop() * env.mirror
@@ -275,8 +276,8 @@ local INSTRUCTIONS = {
     ['p:'] = function (self, stack, env, data)
         local th = stack:pop()
         self.timeline:eval(0, horizontal, self.link, stack:pop(), env.sides, th + env.tolerance, env.mirror, data)
-        env.pc = env.pc + 1
         self.timeline:event(thicknessToSeconds(th))
+        env.pc = env.pc + 1
     end
 }
 
@@ -441,9 +442,11 @@ end
 function Patternizer:restrict(program)
     if not Filter.TABLE(program) then errorf(2, 'Interpret', 'Argument #1 is not a table.') end
     if not program.restrict then return true end
+    local sides = self.sides:get()
     return interpret(nil, program, BASIC_INSTRUCTIONS, {
         pc = program.restrict,
-        sides = self.sides:get()
+        sides = sides,
+        hsides = sides * 0.5
     }, Stack:new(), 2) ~= 0
 end
 
