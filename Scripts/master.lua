@@ -77,21 +77,21 @@ end
 -- Functions to be linked must have the form: function (side, thickness) end
 -- Doubles as the table for links
 function Patternizer.link.__call(_, self, char, fn)
-	char = Filter.STRING(char) and char:match("^([%w%._])$")
-		or errorf(2, "Link", "Argument #1 is not an alphanumeric character, period, or underscore.")
-	self.link[char] = Filter.FUNCTION(fn) and fn or errorf(2, "Link", "Argument #2 is not a function.")
+	if not Filter.FUNCTION(fn) then
+		errorf(2, "Link", "Argument #2 is not a function.")
+	end
+	if not (Filter.STRING(char) and char:match("^([%w%._])$")) then
+		errorf(2, "Link", "Argument #1 is not a single alphanumeric character, period, or underscore.")
+	end
+	self.link[char] = fn
 end
 
 -- Unlinks a character
-function Patternizer:unlink(...)
-	local t = { ... }
-	local len = #t
-	for i = 1, len do
-		local char = t[i]
-		char = Filter.STRING(char) and char:match("^([%w%._])$")
-			or errorf(2, "Link", "Argument #%d is not an alphanumeric character, period, or underscore.", i)
-		self.link[char] = nil
+function Patternizer:unlink(char)
+	if not (Filter.STRING(char) and char:match("^([%w%._])$")) then
+		errorf(2, "Link", "Argument #1 is not a single alphanumeric character, period, or underscore.")
 	end
+	self.link[char] = nil
 end
 
 --[[
@@ -127,11 +127,11 @@ function Stack:pop()
 end
 
 function Stack:peek(depth)
-    local n = self.sp - 1 - (depth or 0)
-    if n <= 0 then
+	local n = self.sp - 1 - (depth or 0)
+	if n <= 0 then
 		errorf(0, "Stack", "Stack underflow (bad peek).")
 	end
-    return self.list[self.sp - 1 - (n or 0)]
+	return self.list[self.sp - 1 - (n or 0)]
 end
 
 --[[
@@ -173,77 +173,77 @@ end
 -- Instuctions available only after the #restrict instruction
 local BASIC_INSTRUCTIONS = {
 	-- Math
-	["+"] = function(_, stack)
+	["+"] = function(stack)
 		stack:push(stack:pop() + stack:pop())
 	end,
-	["-"] = function(_, stack)
+	["-"] = function(stack)
 		local b = stack:pop()
 		stack:push(stack:pop() - b)
 	end,
-	["*"] = function(_, stack)
+	["*"] = function(stack)
 		stack:push(stack:pop() * stack:pop())
 	end,
-	["/"] = function(_, stack)
+	["/"] = function(stack)
 		local b = stack:pop()
 		stack:push(stack:pop() / b)
 	end,
-	["%"] = function(_, stack)
+	["%"] = function(stack)
 		local b = stack:pop()
 		stack:push(stack:pop() % b)
 	end,
-	["floor"] = function(_, stack)
+	["floor"] = function(stack)
 		stack:push(math.floor(stack:pop()))
 	end,
-	["ceil"] = function(_, stack)
+	["ceil"] = function(stack)
 		stack:push(math.ceil(stack:pop()))
 	end,
-	["abs"] = function(_, stack)
+	["abs"] = function(stack)
 		stack:push(math.abs(stack:pop()))
 	end,
-	["sgn"] = function(_, stack)
+	["sgn"] = function(stack)
 		stack:push(getSign(stack:pop()))
 	end,
 
 	-- Logic
-	["=="] = function(_, stack)
+	["=="] = function(stack)
 		stack:push((stack:pop() == stack:pop()) and 1 or 0)
 	end,
-	["!="] = function(_, stack)
+	["!="] = function(stack)
 		stack:push((stack:pop() ~= stack:pop()) and 1 or 0)
 	end,
-	["<"] = function(_, stack)
+	["<"] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() < b) and 1 or 0)
 	end,
-	["<="] = function(_, stack)
+	["<="] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() <= b) and 1 or 0)
 	end,
-	[">"] = function(_, stack)
+	[">"] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() > b) and 1 or 0)
 	end,
-	[">="] = function(_, stack)
+	[">="] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() >= b) and 1 or 0)
 	end,
-	["or"] = function(_, stack)
+	["or"] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() ~= 0 or b ~= 0) and 1 or 0)
 	end,
-	["and"] = function(_, stack)
+	["and"] = function(stack)
 		local b = stack:pop()
 		stack:push((stack:pop() ~= 0 and b ~= 0) and 1 or 0)
 	end,
-	["not"] = function(_, stack)
+	["not"] = function(stack)
 		stack:push(stack:pop() == 0 and 1 or 0)
 	end,
 
 	-- Variables
-	["$sides"] = function(_, stack, env)
+	["$sides"] = function(stack, env)
 		stack:push(env.sides)
 	end,
-	["$hsides"] = function(_, stack, env)
+	["$hsides"] = function(stack, env)
 		stack:push(env.hsides)
 	end,
 }
@@ -252,32 +252,32 @@ BASIC_INSTRUCTIONS.__index = BASIC_INSTRUCTIONS
 -- The full set of instructions
 local INSTRUCTIONS = {
 	-- Random function
-	["rnd"] = function(_, stack)
+	["rnd"] = function(stack)
 		local b = stack:pop()
 		stack:push(u_rndInt(stack:pop(), b))
 	end,
 
 	-- Stack operations
-	["dup"] = function(_, stack)
+	["dup"] = function(stack)
 		stack:push(stack:peek())
 	end,
-	["drop"] = function(_, stack)
+	["drop"] = function(stack)
 		stack:pop()
 	end,
-	["swap"] = function(_, stack)
+	["swap"] = function(stack)
 		local a = stack:pop()
 		local b = stack:pop()
 		stack:push(a)
 		stack:push(b)
 	end,
-	["over"] = function(_, stack)
+	["over"] = function(stack)
 		stack:push(stack:peek(1))
 	end,
-    ["raise"] = function(_, stack)
-        local depth = stack:pop()
+	["raise"] = function(stack)
+		local depth = stack:pop()
 		stack:push(stack:peek(depth))
-	end
-	["roll"] = function(_, stack)
+	end,
+	["roll"] = function(stack)
 		local times = stack:pop()
 		local depth = stack:pop()
 		if depth == 0 or times == 0 then
@@ -294,10 +294,10 @@ local INSTRUCTIONS = {
 	end,
 
 	-- Control flow
-	["while"] = function(_, stack, env, jump)
+	["while"] = function(stack, env, jump)
 		env.pc = stack:pop() == 0 and jump or env.pc + 1
 	end,
-	["for"] = function(_, stack, env, jump)
+	["for"] = function(stack, env, jump)
 		local i = stack:pop()
 		if i == 0 then
 			env.pc = jump
@@ -307,7 +307,7 @@ local INSTRUCTIONS = {
 		end
 	end,
 	-- ['if'] = ['while']
-	["else"] = function(_, _, env, jump)
+	["else"] = function(_, env, jump)
 		env.pc = jump
 	end,
 	-- ['end'] = ['else'],
@@ -315,88 +315,87 @@ local INSTRUCTIONS = {
 	["#restrict"] = __TRUE,
 
 	-- Variables
-	["$th"] = function(_, stack)
+	["$th"] = function(stack)
 		stack:push(THICKNESS)
 	end,
-	["$idealth"] = function(_, stack, env)
+	["$idealth"] = function(stack, env)
 		stack:push(env.idealth)
 	end,
-	["$idealdl"] = function(_, stack, env)
+	["$idealdl"] = function(stack, env)
 		stack:push(env.idealdl)
 	end,
-	["$sperpr"] = function(_, stack)
+	["$sperpr"] = function(stack)
 		stack:push(SECONDS_PER_PLAYER_ROTATION)
 	end,
-	["$abs"] = function(_, stack, env)
+	["$abs"] = function(stack, env)
 		stack:push(env.abs)
 	end,
-	["$rel"] = function(_, stack, env)
+	["$rel"] = function(stack, env)
 		stack:push(env.rel)
 	end,
-	["$rof"] = function(_, stack, env)
+	["$rof"] = function(stack, env)
 		stack:push(env.rof)
 	end,
-	["$mirror"] = function(_, stack, env)
+	["$mirror"] = function(stack, env)
 		stack:push(env.mirror)
 	end,
-	["$tolerance"] = function(_, stack, env)
+	["$tolerance"] = function(stack, env)
 		stack:push(env.tolerance)
 	end,
 
 	-- Position functions
-	["rmv"] = function(_, stack, env)
+	["rmv"] = function(stack, env)
 		local ofs = stack:pop()
 		env.rof = (ofs + env.hsides) % env.sides - env.hsides
 		env.rel = (env.rel + ofs * env.mirror) % env.sides
 	end,
-	["amv"] = function(_, stack, env)
+	["amv"] = function(stack, env)
 		local ofs = stack:pop() * env.mirror
 		local old = env.rel
 		env.rel = ofs % env.sides
 		env.rof = (env.rel - old) * env.mirror
 	end,
-	[">>"] = function(_, stack, env)
+	[">>"] = function(stack, env)
 		local b = stack:pop() * env.mirror
 		stack:push((stack:pop() + b) % env.sides)
 	end,
-	["<<"] = function(_, stack, env)
+	["<<"] = function(stack, env)
 		local b = stack:pop() * env.mirror
 		stack:push((stack:pop() - b) % env.sides)
 	end,
-
 	-- ['a'] = ['$abs']
-	["r"] = function(_, stack, env)
+	["r"] = function(stack, env)
 		stack:push((env.abs + env.rel) % env.sides)
 	end,
 
 	-- Thickness functions
-	["i"] = function(_, stack, env)
+	["i"] = function(stack, env)
 		stack:push(stack:pop() * env.idealth)
 	end,
-	["spath"] = function(_, stack, env)
+	["spath"] = function(stack, env)
 		stack:push(math.abs(env.rof) * env.idealth)
 	end,
-	["lpath"] = function(_, stack, env)
+	["lpath"] = function(stack, env)
 		stack:push((env.sides - math.abs(env.rof)) * env.idealth)
 	end,
-	["th2s"] = function(_, stack)
+	["th2s"] = function(stack)
 		stack:push(thicknessToSeconds(stack:pop()))
 	end,
-	["s2th"] = function(_, stack)
+	["s2th"] = function(stack)
 		stack:push(secondsToThickness(stack:pop()))
 	end,
 
 	-- Timeline functions
-	["sleep"] = function(self, stack)
+	["sleep"] = function(stack, _, _, self)
 		self.timeline:wait(stack:pop())
 	end,
-	["thsleep"] = function(self, stack)
+	["thsleep"] = function(stack, _, _, self)
 		self.timeline:wait(thicknessToSeconds(stack:pop()))
 	end,
-	["rsleep"] = function(self, stack)
+	["rsleep"] = function(stack, _, _, self)
 		self.timeline:wait(SECONDS_PER_PLAYER_ROTATION * stack:pop())
 	end,
-	["call:"] = function(self, stack, env, char)
+	["call:"] = function(stack, env, char, self)
 		local args = {}
 		for i = stack:pop(), 1, -1 do
 			args[i] = stack:pop()
@@ -407,7 +406,7 @@ local INSTRUCTIONS = {
 		env.pc = env.pc + 1
 	end,
 
-	["T:"] = function(self, stack, env, data)
+	["T:"] = function(stack, env, data, self)
 		local th = stack:pop()
 		local pos = stack:pop()
 		self.timeline:call(function()
@@ -415,9 +414,9 @@ local INSTRUCTIONS = {
 		end)
 		env.pc = env.pc + 1
 	end,
-    -- ['h:'] = ['T:']
+	-- ['h:'] = ['T:']
 
-	["t:"] = function(self, stack, env, data)
+	["t:"] = function(stack, env, data, self)
 		local th = stack:pop()
 		local pos = stack:pop()
 		self.timeline:call(function()
@@ -426,7 +425,7 @@ local INSTRUCTIONS = {
 		env.pc = env.pc + 1
 	end,
 
-	["P:"] = function(self, stack, env, data)
+	["P:"] = function(stack, env, data, self)
 		local th = stack:pop()
 		local pos = stack:pop()
 		self.timeline:call(function()
@@ -436,7 +435,7 @@ local INSTRUCTIONS = {
 		env.pc = env.pc + 1
 	end,
 
-	["p:"] = function(self, stack, env, data)
+	["p:"] = function(stack, env, data, self)
 		local th = stack:pop()
 		local pos = stack:pop()
 		self.timeline:call(function()
@@ -449,6 +448,7 @@ local INSTRUCTIONS = {
 
 INSTRUCTIONS["if"] = INSTRUCTIONS["while"]
 INSTRUCTIONS["end"] = INSTRUCTIONS["else"]
+INSTRUCTIONS["endif"] = INSTRUCTIONS["else"]
 INSTRUCTIONS["a"] = INSTRUCTIONS["$abs"]
 INSTRUCTIONS["h:"] = INSTRUCTIONS["T:"]
 
@@ -521,7 +521,7 @@ function Patternizer.compile(str)
 		end
 	end
 
-	local bodytokenizer = function(ins)
+	local body_tokenizer = function(ins)
 		if ins == "#restrict" then
 			new_program[address] = ins
 			-- Add the restrict statement address.
@@ -564,12 +564,26 @@ function Patternizer.compile(str)
 			new_program[top.address].data = address + 1
 		elseif ins == "endif" then
 			-- TODO: endif will close as many if statements in a row as possible
+			
 			local success, top = pcall(stack.pop, stack)
+
+			-- One closure is required
 			if not (success and (top.type == "if" or top.type == "else")) then
 				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', ins, address)
 			end
 
-            new_program[top.address]
+			new_program[address] = { ins = ins, data = address + 1 }
+			new_program[top.address] = address + 1
+
+			success, top = pcall(stack.peek, stack)
+			if not (success and (top.type == "if" or top.type == "else")) then
+				-- Done
+			end
+			-- Discard the top value (we just peeked it so we have it).
+			stack.pop()
+
+			new_program[address] = { ins = ins, data = address + 1 }
+			new_program[top.address] = address + 1
 		else
 			local chars
 			ins, chars = ins:match("^([^:]+:?)(.-)$")
@@ -598,7 +612,7 @@ function Patternizer.compile(str)
 		end
 	end
 
-	tokenizer = bodytokenizer
+	tokenizer = body_tokenizer
 
 	-- Iterate through all tokens
 	for ins in str:gsplit("[%s]+") do
@@ -629,12 +643,12 @@ local function interpret(self, program, instructionSet, env, stack, errlvl)
 			stack:push(ins)
 			env.pc = env.pc + 1
 		elseif instype == "string" then
-			if instructionSet[ins](self, stack, env) then
+			if instructionSet[ins](stack, env) then
 				return unpack(stack, 1, stack.sp - 1)
 			end
 			env.pc = env.pc + 1
 		elseif instype == "table" then
-			instructionSet[ins.ins](self, stack, env, ins.data)
+			instructionSet[ins.ins](stack, env, ins.data, self)
 		else
 			return unpack(stack, 1, stack.sp - 1)
 		end
@@ -702,6 +716,10 @@ end
 -- Begins the pattern sequence.
 -- This function is disabled while a pattern exists on the timeline.
 function Patternizer:spawn()
+	if self.pattern.suspended then
+		return
+	end
+
 	local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
 	local pool, len = {}, 0
 	for i = 1, plistlen do
@@ -735,6 +753,21 @@ function Patternizer:pspawn()
 	self:spawn()
 end
 
+
+function Patternizer:add_program(exec)
+	local n = self.pattern.total + 1
+	self.pattern.list[n] = exec
+	self.pattern.total = n
+end
+
+function Patternizer:add_pattern(source)
+	self:add_program(Patternizer.compile(source))
+end
+
+-- ! Depreciated functions
+--#region
+
+-- ! Depreciated
 -- Adds compiles and patterns
 function Patternizer:add(...)
 	local t = { ... }
@@ -744,6 +777,7 @@ function Patternizer:add(...)
 	self:addprogram(unpack(t))
 end
 
+-- ! Depreciated
 -- Accepts already compiled patterns
 function Patternizer:addprogram(...)
 	local t, start = { ... }, self.pattern.total
@@ -757,6 +791,8 @@ function Patternizer:addprogram(...)
 end
 -- ! Legacy name
 Patternizer.addProgram = Patternizer.addprogram
+
+--#endregion
 
 -- Removes all patterns
 function Patternizer:clear()
@@ -777,3 +813,9 @@ function Patternizer:run(mFrameTime)
 	self:pspawn()
 	self:step(mFrameTime)
 end
+
+
+-- TODO: Clean up the weird code that I wrote years ago
+-- TODO: Bin shuffling
+-- TODO: Implement raise and endif instructions
+-- TODO: Ensure that nothing broke terribly
