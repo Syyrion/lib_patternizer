@@ -23,13 +23,14 @@
 
 u_execDependencyScript("library_extbase", "extbase", "syyrion", "utils.lua")
 u_execDependencyScript("library_extbase", "extbase", "syyrion", "common.lua")
-u_execDependencyScript("library_slider", "slider", "syyrion", "master.lua")
 u_execScript("signal.lua")
 
 --[[
     * Patternizer
 ]]
-
+---@class Patternizer
+---@field link table
+---@field included_functions table
 Patternizer = {
 	link = {
 		["c"] = function(...)
@@ -68,6 +69,7 @@ function Patternizer:new(...)
 			list = {},
 			total = 0,
 		},
+		included_functions = {},
 	}, self)
 	newInst:add(...)
 	return newInst
@@ -120,10 +122,12 @@ end
 
 function Stack:pop()
 	self.sp = self.sp - 1
-	if sp == 0 then
+	if self.sp == 0 then
 		errorf(0, "Stack", "Stack underflow (bad pop).")
 	end
-	return self.list[self.sp]
+	local temp = self.list[self.sp]
+	self.list[self.sp] = nil
+	return temp
 end
 
 function Stack:peek(depth)
@@ -131,13 +135,58 @@ function Stack:peek(depth)
 	if n <= 0 then
 		errorf(0, "Stack", "Stack underflow (bad peek).")
 	end
-	return self.list[self.sp - 1 - (n or 0)]
+	return self.list[n]
+end
+
+local RuntimeStack = {}
+RuntimeStack.__index = RuntimeStack
+
+function RuntimeStack:new()
+	local newinst = {
+		stack = Stack:new(),
+		scope_stack = Stack:new(),
+	}
+	return setmetatable(newinst, self)
+end
+
+function RuntimeStack:push(n)
+	self.stack:push(n)
+end
+
+function RuntimeStack:pop()
+	if self.stack.sp == self.scope_stack:peek() then
+		errorf(0, "Stack", "Unable to modify stack snapshot after function statement has begun (bad pop).")
+	end
+	self.stack:pop()
+end
+
+function RuntimeStack:peek(depth)
+	self.stack:push(depth)
+end
+
+function RuntimeStack:begin_args()
+	self.scope_stack:push(self.stack.sp)
+end
+
+function RuntimeStack:flush()
+	local target_sp = self.scope_stack:pop()
+	local args = {}
+	while self.stack.sp > target_sp do
+		table.insert(args, self.stack:pop())
+	end
+	return args
 end
 
 --[[
     * Wall generator
     Creates a single row of walls
 ]]
+---@param link table table of linked characters
+---@param pos integer starting side
+---@param sides integer number of sides
+---@param th number thickness
+---@param dir integer -1 or 1. Direction of generation
+---@param data table
 local function horizontal(link, pos, sides, th, dir, data)
 	local step, ix = sides / data.length, 0
 	dir = dir * data.dir
@@ -249,12 +298,24 @@ local BASIC_INSTRUCTIONS = {
 }
 BASIC_INSTRUCTIONS.__index = BASIC_INSTRUCTIONS
 
+local function jump(_, env, jump)
+	env.pc = jump
+end
+
+local function jump_if_zero(stack, env, jump)
+	env.pc = stack:pop() == 0 and jump or env.pc + 1
+end
+
+local function push_abs_pos(stack, env)
+	stack:push(env.abs)
+end
+
 -- The full set of instructions
 local INSTRUCTIONS = {
 	-- Random function
 	["rnd"] = function(stack)
 		local b = stack:pop()
-		stack:push(u_rndInt(stack:pop(), b))
+		stack:push(math.random(stack:pop(), b))
 	end,
 
 	-- Stack operations
@@ -277,10 +338,18 @@ local INSTRUCTIONS = {
 		local depth = stack:pop()
 		stack:push(stack:peek(depth))
 	end,
+	["clone"] = function(stack)
+		local size = stack.sp - 1
+		for i = 1, size do
+			stack:push(stack:peek(size - 1))
+		end
+	end,
+
 	["roll"] = function(stack)
 		local times = stack:pop()
 		local depth = stack:pop()
-		if depth == 0 or times == 0 then
+		-- These specific inputs don't do anything.
+		if depth == 0 or depth == 1 or times == 0 then
 			return
 		end
 		depth = depth % stack.sp
@@ -294,9 +363,8 @@ local INSTRUCTIONS = {
 	end,
 
 	-- Control flow
-	["while"] = function(stack, env, jump)
-		env.pc = stack:pop() == 0 and jump or env.pc + 1
-	end,
+	["if"] = jump_if_zero,
+	["while"] = jump_if_zero,
 	["for"] = function(stack, env, jump)
 		local i = stack:pop()
 		if i == 0 then
@@ -306,11 +374,12 @@ local INSTRUCTIONS = {
 			env.pc = env.pc + 1
 		end
 	end,
-	-- ['if'] = ['while']
-	["else"] = function(_, env, jump)
-		env.pc = jump
-	end,
-	-- ['end'] = ['else'],
+
+	["else"] = jump,
+	["end"] = jump,
+	["endif"] = jump,
+
+	-- Returning true ends the program
 	["return"] = __TRUE,
 	["#restrict"] = __TRUE,
 
@@ -327,9 +396,7 @@ local INSTRUCTIONS = {
 	["$sperpr"] = function(stack)
 		stack:push(SECONDS_PER_PLAYER_ROTATION)
 	end,
-	["$abs"] = function(stack, env)
-		stack:push(env.abs)
-	end,
+	["$abs"] = push_abs_pos,
 	["$rel"] = function(stack, env)
 		stack:push(env.rel)
 	end,
@@ -363,7 +430,7 @@ local INSTRUCTIONS = {
 		local b = stack:pop() * env.mirror
 		stack:push((stack:pop() - b) % env.sides)
 	end,
-	-- ['a'] = ['$abs']
+	["a"] = push_abs_pos,
 	["r"] = function(stack, env)
 		stack:push((env.abs + env.rel) % env.sides)
 	end,
@@ -444,15 +511,45 @@ local INSTRUCTIONS = {
 		self.timeline:wait(thicknessToSeconds(th))
 		env.pc = env.pc + 1
 	end,
+
+	["#("] = function(stack)
+		stack:begin_args()
+	end,
+	["("] = function(stack)
+		stack:begin_args()
+	end,
+	[")"] = function(stack, _, data, self)
+		local args = stack:flush_args()
+		local fn = self.included_functions[data.fn_name]
+		if not fn then
+			errorf(0, 'Attempted to call an undefined function "%s"', data.fn_name)
+		end
+		if data.timeline then
+			self.timeline:call(function()
+				fn(unpack(args))
+			end)
+		else
+			fn(unpack(args))
+		end
+	end,
 }
 
-INSTRUCTIONS["if"] = INSTRUCTIONS["while"]
-INSTRUCTIONS["end"] = INSTRUCTIONS["else"]
-INSTRUCTIONS["endif"] = INSTRUCTIONS["else"]
-INSTRUCTIONS["a"] = INSTRUCTIONS["$abs"]
 INSTRUCTIONS["h:"] = INSTRUCTIONS["T:"]
 
 setmetatable(INSTRUCTIONS, BASIC_INSTRUCTIONS)
+
+function Patternizer:include(fn, name)
+	if not Filter.FUNCTION(fn) then
+		errorf(2, "Include", "Argument #1 is not a function.")
+	end
+	if not Filter.STRING(name) then
+		errorf(2, "Include", "Argument #2 is not a string.")
+	end
+	if INSTRUCTIONS[name] or not name:match("^[%a_][%w_]*$") then
+		errorf(2, "Include", "Argument #2 is not a valid function name.")
+	end
+	self.included_functions[name] = fn
+end
 
 --[[
     * Compilers
@@ -492,65 +589,90 @@ end
 Patternizer.strWall = Patternizer.strwall
 
 -- Compiles a string into a table.
-function Patternizer.compile(str)
-	if not Filter.STRING(str) then
+function Patternizer.compile(source)
+	if not Filter.STRING(source) then
 		errorf(2, "Compilation", "Argument #1 is not a string.")
 	end
 
-	-- Strip comments and leading/trailing whitespace
-	str = str:gsub("//[^\n]*", ""):match("^%s*(.-)%s*$")
+	-- Strip comments
+	source = string.gsub(source, "--[^\n]*", "")
 
-	-- Return an empty program if the string is now empty
-	if str:len() == 0 then
-		return {}
-	end
+	-- Pad parentheses
+	source = string.gsub(source, "#?[%(%)]", " %0 ")
 
-	local address, new_program, stack = 1, {}, Stack:new()
+	local address, new_program, scope_stack = 1, {}, Stack:new()
 
-	---Converts an instruction token and adds it to the program
-	---@type function
-	local tokenizer
-
-	local restrict_tokenizer = function(ins)
-		if BASIC_INSTRUCTIONS[ins] then
-			new_program[address] = ins
+	local restrict_tokenizer = function(instruction)
+		if BASIC_INSTRUCTIONS[instruction] then
+			new_program[address] = instruction
+			return
 		end
-		new_program[address] = tonumber(ins)
+		new_program[address] = tonumber(instruction)
 		if not new_program[address] then
-			errorf(3, "Compilation", 'Unrecognized or illegal "%s" at instruction %d after #restrict.', ins, address)
+			errorf(
+				3,
+				"Compilation",
+				'Unrecognized or illegal "%s" at instruction %d after #restrict.',
+				instruction,
+				address
+			)
 		end
 	end
 
-	local body_tokenizer = function(ins)
-		if ins == "#restrict" then
-			new_program[address] = ins
+	local tokenize_as_function = nil
+	local body_tokenizer = function(instruction)
+		if tokenize_as_function then
+			-- Ensure function name is valid
+			if INSTRUCTIONS[instruction] or not name:match("^[%a_][%w_]*$") then
+				errorf(3, "Compilation", 'Invalid function name "%s" at instruction %d', instruction, address)
+			end
+
+			local new_ins = {
+				ins = ")",
+				data = {
+					fn_name = instruction,
+				},
+			}
+			if tokenize_as_function == "#(" then
+				new_ins.data.timeline = true
+			else
+				new_ins.data.timeline = false
+			end
+			new_program[address] = new_ins
+
+			-- Clear the flag
+			tokenize_as_function = nil
+		elseif instruction == "#restrict" then
+			new_program[address] = instruction
 			-- Add the restrict statement address.
 			new_program.restrict = address + 1
+			-- Switch tokenizers
 			tokenizer = restrict_tokenizer
-		elseif ins == "while" or ins == "for" or ins == "if" then
+		elseif instruction == "while" or instruction == "for" or instruction == "if" then
 			-- Push the instruction type and address.
-			stack:push({ type = ins, address = address })
+			scope_stack:push({ type = instruction, address = address })
 			-- Add the instruction to the program. Jump information will get filled later.
-			new_program[address] = { ins = ins }
-		elseif ins == "else" then
-			local success, top = pcall(stack.pop, stack)
+			new_program[address] = { ins = instruction }
+		elseif instruction == "else" then
+			-- Pop the scope stack
+			local success, top = pcall(scope_stack.pop, scope_stack)
 			if not (success and top.type == "if") then
-				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', ins, address)
+				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', instruction, address)
 			end
 
 			-- Add the instruction to the program. Jump information will get filled later.
-			new_program[address] = { ins = ins }
+			new_program[address] = { ins = instruction }
 			-- Add the jump address to the corresponding if.
 			new_program[top.address].data = address + 1
 			-- Push the else instruction and address.
-			stack:push({ type = ins, address = address })
-		elseif ins == "end" then
-			local success, top = pcall(stack.pop, stack)
+			scope_stack:push({ type = instruction, address = address })
+		elseif instruction == "end" then
+			local success, top = pcall(scope_stack.pop, scope_stack)
 			if not success then
-				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', ins, address)
+				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', instruction, address)
 			end
 
-			local new_ins = { ins = ins }
+			local new_ins = { ins = instruction }
 			if top.type == "while" or top.type == "for" then
 				-- Whiles and fors jump back to top
 				new_ins.data = top.address
@@ -562,67 +684,82 @@ function Patternizer.compile(str)
 
 			-- Add the jump address to the corresponding instruction.
 			new_program[top.address].data = address + 1
-		elseif ins == "endif" then
-			-- TODO: endif will close as many if statements in a row as possible
-			
-			local success, top = pcall(stack.pop, stack)
+		elseif instruction == "endif" then
+			local success, top = pcall(scope_stack.pop, scope_stack)
 
 			-- One closure is required
 			if not (success and (top.type == "if" or top.type == "else")) then
-				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', ins, address)
+				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', instruction, address)
 			end
 
-			new_program[address] = { ins = ins, data = address + 1 }
-			new_program[top.address] = address + 1
+			-- Add instruction to program. Only need to do this once.
+			new_program[address] = { ins = instruction, data = address + 1 }
+			-- Add the jump address to the corresponding instruction.
+			new_program[top.address].data = address + 1
 
-			success, top = pcall(stack.peek, stack)
-			if not (success and (top.type == "if" or top.type == "else")) then
-				-- Done
+			-- Repeat until all ifs and elses are closed
+			success, top = pcall(scope_stack.peek, scope_stack)
+			while success and (top.type == "if" or top.type == "else") do
+				-- Discard the top value (we just peeked it so we have it).
+				scope_stack:pop()
+				-- Add the jump address to the corresponding instruction.
+				new_program[top.address].data = address + 1
+				success, top = pcall(scope_stack.peek, scope_stack)
 			end
-			-- Discard the top value (we just peeked it so we have it).
-			stack.pop()
-
-			new_program[address] = { ins = ins, data = address + 1 }
-			new_program[top.address] = address + 1
+		elseif instruction == "(" or instruction == "#(" then
+			-- Push and add instruction
+			scope_stack:push({ type = instruction })
+			new_program[address] = instruction
+		elseif instruction == ")" then
+			local success, top = pcall(scope_stack.pop, scope_stack)
+			if not (success and (top.type == "(" or top.type == "#(")) then
+				errorf(3, "Compilation", 'Unmatched "%s" at instruction %d', instruction, address)
+			end
+			-- Flag the next instruction as a function name.
+			-- The instruction type is used as a flag so we know whether it's for the timeline or not.
+			tokenize_as_function = top.type
+			-- This doesn't add an instruction. That will happen on the next iteration.
 		else
 			local chars
-			ins, chars = ins:match("^([^:]+:?)(.-)$")
-			if ins == "h:" or ins == "t:" or ins == "p:" then
+			instruction, chars = instruction:match("^([^:]+:?)(.-)$")
+			if instruction == "h:" or instruction == "t:" or instruction == "p:" then
 				local dir, pattern = chars:match("^(~?)([%w%._|%+%-]-)$")
 				if not dir then
-					errorf(3, "Compilation", 'Invalid pattern at instruction %d, "%s".', address, ins)
+					errorf(3, "Compilation", 'Invalid pattern at instruction %d, "%s".', address, instruction)
 				end
-				new_program[address] = { ins = ins, data = decode(dir, pattern) }
-			elseif ins == "call:" then
+				new_program[address] = { ins = instruction, data = decode(dir, pattern) }
+			elseif instruction == "call:" then
 				new_program[address] = {
-					ins = ins,
+					ins = instruction,
 					data = chars:match("^[%w%._]$") or errorf(
 						3,
 						"Compilation",
 						'At instruction %d, "%s" can only accept one function character.',
 						address,
-						ins
+						instruction
 					),
 				}
 			else
-				new_program[address] = INSTRUCTIONS[ins] and ins
-					or tonumber(ins)
-					or errorf(3, "Compilation", 'Unrecognized "%s" at instruction %d.', ins, address)
+				new_program[address] = INSTRUCTIONS[instruction] and instruction
+					or tonumber(instruction)
+					or errorf(3, "Compilation", 'Unrecognized "%s" at instruction %d.', instruction, address)
 			end
 		end
 	end
 
-	tokenizer = body_tokenizer
+	local tokenizer = body_tokenizer
 
-	-- Iterate through all tokens
-	for ins in str:gsplit("[%s]+") do
-		tokenizer(ins)
+	-- Iterate through tokens
+	for match in string.gmatch(source, "[^%s]+%s*") do
+		-- trim whitespace
+		local token = string.match(match, "^%s*(.-)%s*$")
+		tokenizer(token)
 		address = address + 1
 	end
 
 	-- Check that the stack is empty
-	if stack.sp > 1 then
-		local top = stack:pop()
+	if scope_stack.sp > 1 then
+		local top = scope_stack:pop()
 		errorf(2, "Compilation", 'Unmatched "%s" at instruction %d.', top.type, top.address)
 	end
 
@@ -633,24 +770,26 @@ end
     * Interpreters
 ]]
 
-local INSTRUCTION_LIMIT = 1048575
+local INSTRUCTION_LIMIT = 99999999
 
-local function interpret(self, program, instructionSet, env, stack, errlvl)
+-- TODO: add custom functions
+local function interpret(self, program, instruction_set, env, stack, errlvl)
 	for _ = 1, INSTRUCTION_LIMIT do
 		local ins = program[env.pc]
 		local instype = type(ins)
+
 		if instype == "number" then
 			stack:push(ins)
 			env.pc = env.pc + 1
 		elseif instype == "string" then
-			if instructionSet[ins](stack, env) then
-				return unpack(stack, 1, stack.sp - 1)
+			if instruction_set[ins](stack, env) then
+				return unpack(stack.list, 1, stack.sp - 1)
 			end
 			env.pc = env.pc + 1
 		elseif instype == "table" then
-			instructionSet[ins.ins](stack, env, ins.data, self)
+			instruction_set[ins.ins](stack, env, ins.data, self)
 		else
-			return unpack(stack, 1, stack.sp - 1)
+			return unpack(stack.list, 1, stack.sp - 1)
 		end
 	end
 	errorf(errlvl + 1, "Runtime", "Instruction limit of %d reached.", INSTRUCTION_LIMIT)
@@ -706,6 +845,8 @@ end
     * Pattern Organizers
 ]]
 
+-- TODO: Clean up this
+
 function Patternizer:disable()
 	self.spawn = __NIL
 end
@@ -753,15 +894,13 @@ function Patternizer:pspawn()
 	self:spawn()
 end
 
-
-function Patternizer:add_program(exec)
+function Patternizer:add_program(program)
+	if not Filter.TABLE(program) then
+		errorf(2, "AddProgram", "Argument #1 is not a table")
+	end
 	local n = self.pattern.total + 1
-	self.pattern.list[n] = exec
+	self.pattern.list[n] = program
 	self.pattern.total = n
-end
-
-function Patternizer:add_pattern(source)
-	self:add_program(Patternizer.compile(source))
 end
 
 -- ! Depreciated functions
@@ -813,7 +952,6 @@ function Patternizer:run(mFrameTime)
 	self:pspawn()
 	self:step(mFrameTime)
 end
-
 
 -- TODO: Clean up the weird code that I wrote years ago
 -- TODO: Bin shuffling
