@@ -232,7 +232,6 @@ function signal.Queue:fast_forward()
     self.t = 1
 end
 
-
 -- ! freq is now duration !
 ---Updates the signal.
 ---@param ft number
