@@ -19,12 +19,6 @@
             "name": "extbase",
             "author": "syyrion",
             "min_version": 1103
-        },
-        {
-            "disambiguator": "library_polywall",
-            "name": "polywall",
-            "author": "syyrion",
-            "min_version": 2307
         }
     ]
 }

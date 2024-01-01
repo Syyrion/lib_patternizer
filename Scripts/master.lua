@@ -67,11 +67,16 @@ function Patternizer:new(...)
         tolerance = self.tolerance:new(),
         pattern = {
             list = {},
-            total = 0,
+            total = 0
         },
         included_functions = {},
     }, self)
-    newInst:add(...)
+    
+    local t = { ... }
+    for i = 1, #t do
+        newInst:add_program(Patternizer.compile(t[i]))
+    end
+
     return newInst
 end
 
@@ -468,6 +473,8 @@ local INSTRUCTIONS = {
     ["rsleep"] = function(stack, _, _, self)
         self.timeline:wait(SECONDS_PER_PLAYER_ROTATION * stack:pop())
     end,
+
+	-- ! Deprecated
     ["call:"] = function(stack, env, char, self)
         local args = {}
         for i = stack:pop(), 1, -1 do
@@ -645,9 +652,7 @@ function Patternizer.compile(source)
 
             local new_ins = {
                 ins = ")",
-                data = {
-                    fn_name = instruction,
-                },
+                data = {},
             }
 
             local link_fn_name = string.match(instruction, "^'([%w%._])'$")
@@ -801,7 +806,6 @@ end
 
 local INSTRUCTION_LIMIT = 99999999
 
--- TODO: add custom functions
 local function interpret(self, program, instruction_set, env, stack, errlvl)
     for _ = 1, INSTRUCTION_LIMIT do
         local ins = program[env.pc]
@@ -862,7 +866,7 @@ function Patternizer:restrict(program)
         pc = program.restrict,
         sides = sides,
         hsides = sides * 0.5,
-    }, Stack:new(), 2) ~= 0
+    }, RuntimeStack:new(), 2) ~= 0
 end
 
 -- Directly interprets a string.
@@ -874,23 +878,39 @@ end
     * Pattern Organizers
 ]]
 
--- TODO: Clean up this
-
-function Patternizer:disable()
-    self.spawn = __NIL
+function Patternizer:allow_pattern_repeat()
+    self.pattern.allow_repeat = true
 end
-function Patternizer:enable()
-    self.spawn = nil
+
+function Patternizer:disable_pattern_repeat()
+    self.pattern.allow_repeat = false
+end
+
+-- Stops or resumes pattern generation. The timeline will still run.
+function Patternizer:suspend()
+    self.pattern.suspended = true
+end
+-- ! Legacy function name
+Patternizer.pause = Patternizer.suspend
+
+function Patternizer:resume()
+    self.pattern.suspended = false
 end
 
 -- Begins the pattern sequence.
 -- This function is disabled while a pattern exists on the timeline.
 function Patternizer:spawn()
-    if self.pattern.suspended then
+    if self.pattern.suspended or self.pattern.disabled then
         return
     end
 
-    local patterns, plistlen, exclude = self.pattern.list, self.pattern.total, self.pattern.previous
+    local patterns, plistlen = self.pattern.list, self.pattern.total
+
+    local exclude = nil
+    if not self.pattern.allow_repeat then
+        exclude = self.pattern.previous
+    end
+
     local pool, len = {}, 0
     for i = 1, plistlen do
         local p = patterns[i]
@@ -904,23 +924,10 @@ function Patternizer:spawn()
         self:interpret(choice)
         self.pattern.previous = choice
         self.timeline:call(function()
-            self:enable()
+            self.pattern.disabled = false
         end)
-        self:disable()
+        self.pattern.disabled = true
     end
-end
-
--- Stops or resumes pattern generation. The timeline will still run.
-function Patternizer:pause()
-    self.pspawn = __NIL
-end
-function Patternizer:resume()
-    self.pspawn = nil
-end
-
--- Same as spawn but can be disabled by pause and resume functions.
-function Patternizer:pspawn()
-    self:spawn()
 end
 
 function Patternizer:add_program(program)
@@ -960,6 +967,28 @@ end
 -- ! Legacy name
 Patternizer.addProgram = Patternizer.addprogram
 
+-- ! Deprecated
+function Patternizer:disable()
+    self.spawn = __NIL
+end
+
+-- ! Deprecated
+function Patternizer:enable()
+    self.spawn = nil
+end
+
+-- ! Deprecated
+-- Same as spawn but can be disabled by pause and resume functions.
+function Patternizer:pspawn()
+    self:spawn()
+end
+
+-- ! Deprecated
+-- Runs the patternizer timeline without spawning patterns
+function Patternizer:step(mFrameTime)
+    self.timeline:update(mFrameTime)
+end
+
 --#endregion
 
 -- Removes all patterns
@@ -971,18 +1000,8 @@ function Patternizer:clear()
     self.pattern.previous = nil
 end
 
--- Runs the patternizer timeline without spawning patterns
-function Patternizer:step(mFrameTime)
+-- Runs the patternizer
+function Patternizer:run(mFrameTime)
+    self:spawn()
     self.timeline:update(mFrameTime)
 end
-
--- Runs the patternizer while also spawning patterns
-function Patternizer:run(mFrameTime)
-    self:pspawn()
-    self:step(mFrameTime)
-end
-
--- TODO: Clean up the weird code that I wrote years ago
--- TODO: Bin shuffling
--- TODO: Implement raise and endif instructions
--- TODO: Ensure that nothing broke terribly
