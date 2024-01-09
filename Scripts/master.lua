@@ -67,11 +67,11 @@ function Patternizer:new(...)
         tolerance = self.tolerance:new(),
         pattern = {
             list = {},
-            total = 0
+            total = 0,
         },
         included_functions = {},
     }, self)
-    
+
     local t = { ... }
     for i = 1, #t do
         newInst:add_program(Patternizer.compile(t[i]))
@@ -259,6 +259,11 @@ local BASIC_INSTRUCTIONS = {
     ["sgn"] = function(stack)
         stack:push(getSign(stack:pop()))
     end,
+    -- Random function
+    ["rnd"] = function(stack)
+        local b = stack:pop()
+        stack:push(math.random(stack:pop(), b))
+    end,
 
     -- Logic
     ["=="] = function(stack)
@@ -302,8 +307,12 @@ local BASIC_INSTRUCTIONS = {
     ["$hsides"] = function(stack, env)
         stack:push(env.hsides)
     end,
+
+    ["#restrict"] = __TRUE,
+    ["#abs"] = __TRUE,
+    ["#mirror"] = __TRUE,
+    ["#tolerance"] = __TRUE,
 }
-BASIC_INSTRUCTIONS.__index = BASIC_INSTRUCTIONS
 
 local function jump(_, env, jump)
     env.pc = jump
@@ -323,12 +332,6 @@ end
 
 -- The full set of instructions
 local INSTRUCTIONS = {
-    -- Random function
-    ["rnd"] = function(stack)
-        local b = stack:pop()
-        stack:push(math.random(stack:pop(), b))
-    end,
-
     -- Stack operations
     ["dup"] = function(stack)
         stack:push(stack:peek())
@@ -392,7 +395,6 @@ local INSTRUCTIONS = {
 
     -- Returning true ends the program
     ["return"] = __TRUE,
-    ["#restrict"] = __TRUE,
 
     -- Variables
     ["$th"] = function(stack)
@@ -474,7 +476,7 @@ local INSTRUCTIONS = {
         self.timeline:wait(SECONDS_PER_PLAYER_ROTATION * stack:pop())
     end,
 
-	-- ! Deprecated
+    -- ! Deprecated
     ["call:"] = function(stack, env, char, self)
         local args = {}
         for i = stack:pop(), 1, -1 do
@@ -562,7 +564,7 @@ local INSTRUCTIONS = {
 
 INSTRUCTIONS["h:"] = INSTRUCTIONS["T:"]
 
-setmetatable(INSTRUCTIONS, BASIC_INSTRUCTIONS)
+setmetatable(INSTRUCTIONS, { __index = BASIC_INSTRUCTIONS })
 
 function Patternizer:include(name, fn)
     if not Filter.FUNCTION(fn) then
@@ -628,33 +630,44 @@ function Patternizer.compile(source)
 
     local address, new_program, scope_stack = 1, {}, Stack:new()
 
-    local restrict_tokenizer = function(instruction)
-        if BASIC_INSTRUCTIONS[instruction] then
+    local tokenizer
+
+    local preprocessor_tokenizer = function(instruction)
+        if
+            instruction == "#restrict"
+            or instruction == "#abs"
+            or instruction == "#mirror"
+            or instruction == "#tolerance"
+        then
             new_program[address] = instruction
-            return
-        end
-        new_program[address] = tonumber(instruction)
-        if not new_program[address] then
-            errorf(
-                3,
-                "Compilation",
-                'Unrecognized or illegal "%s" at instruction %d after #restrict.',
-                instruction,
-                address
-            )
+            -- Add the preprocessor statement address.
+            new_program[string.sub(instruction, 2)] = address + 1
+        elseif BASIC_INSTRUCTIONS[instruction] then
+            new_program[address] = instruction
+        else
+            local number = tonumber(instruction)
+            if not number then
+                errorf(
+                    3,
+                    "Compilation",
+                    'Unrecognized or illegal "%s" at instruction %d after preprocessor instruction.',
+                    instruction,
+                    address
+                )
+            end
+            new_program[address] = number
         end
     end
 
     local tokenize_as_function = nil
     local body_tokenizer = function(instruction)
         if tokenize_as_function then
-            -- Ensure function name is valid
-
             local new_ins = {
                 ins = ")",
                 data = {},
             }
 
+            -- Ensure function name is valid
             local link_fn_name = string.match(instruction, "^'([%w%._])'$")
             if link_fn_name then
                 new_ins.data.fn_name = link_fn_name
@@ -675,12 +688,17 @@ function Patternizer.compile(source)
 
             -- Clear the flag
             tokenize_as_function = nil
-        elseif instruction == "#restrict" then
+        elseif
+            instruction == "#restrict"
+            or instruction == "#abs"
+            or instruction == "#mirror"
+            or instruction == "#tolerance"
+        then
             new_program[address] = instruction
-            -- Add the restrict statement address.
-            new_program.restrict = address + 1
+            -- Add the preprocessor statement address.
+            new_program[string.sub(instruction, 2)] = address + 1
             -- Switch tokenizers
-            tokenizer = restrict_tokenizer
+            tokenizer = preprocessor_tokenizer
         elseif instruction == "while" or instruction == "for" or instruction == "if" then
             -- Push the instruction type and address.
             scope_stack:push({ type = instruction, address = address })
@@ -781,7 +799,7 @@ function Patternizer.compile(source)
         end
     end
 
-    local tokenizer = body_tokenizer
+    tokenizer = body_tokenizer
 
     -- Iterate through tokens
     for match in string.gmatch(source, "[^%s]+%s*") do
@@ -806,7 +824,7 @@ end
 
 local INSTRUCTION_LIMIT = 99999999
 
-local function interpret(self, program, instruction_set, env, stack, errlvl)
+local function interpret(self, program, instruction_set, env, stack)
     for _ = 1, INSTRUCTION_LIMIT do
         local ins = program[env.pc]
         local instype = type(ins)
@@ -825,7 +843,7 @@ local function interpret(self, program, instruction_set, env, stack, errlvl)
             return unpack(stack.stack.list)
         end
     end
-    errorf(errlvl + 1, "Runtime", "Instruction limit of %d reached.", INSTRUCTION_LIMIT)
+    errorf(1, "Runtime", "Instruction limit of %d reached.", INSTRUCTION_LIMIT)
 end
 
 -- Interprets a compiled program.
@@ -841,17 +859,64 @@ function Patternizer:interpret(program, ...)
         hsides = sides * 0.5,
         idealth = getIdealThickness(sides),
         idealdl = getIdealDelayInSeconds(sides),
-        abs = self.randsideinit:get() and u_rndInt(0, sides - 1) or 0,
         rel = 0,
         rof = 0,
-        mirror = self.mirroring:get() and getRandomDir() or 1,
-        tolerance = self.tolerance:get(),
     }
+
+    if program.abs then
+        local abs = interpret(nil, program, BASIC_INSTRUCTIONS, {
+            pc = program.abs,
+            sides = sides,
+            hsides = sides * 0.5,
+        }, RuntimeStack:new())
+
+        if abs then
+            env.abs = math.floor(abs % sides)
+            goto abs_continue
+        end
+    end
+    env.abs = self.randsideinit:get() and u_rndInt(0, sides - 1) or 0
+    ::abs_continue::
+
+    if program.mirror then
+        local mirror = interpret(nil, program, BASIC_INSTRUCTIONS, {
+            pc = program.mirror,
+            sides = sides,
+            hsides = sides * 0.5,
+        }, RuntimeStack:new())
+
+        if mirror then
+            if mirror == -1 then
+                env.mirror = -1
+            else
+                env.mirror = 1
+            end
+            goto mirror_continue
+        end
+    end
+    env.mirror = self.mirroring:get() and getRandomDir() or 1
+    ::mirror_continue::
+
+    if program.tolerance then
+        local tolerance = interpret(nil, program, BASIC_INSTRUCTIONS, {
+            pc = program.tolerance,
+            sides = sides,
+            hsides = sides * 0.5,
+        }, RuntimeStack:new())
+
+        if tolerance then
+            env.tolerance = tolerance
+            goto tolerance_continue
+        end
+    end
+    env.tolerance = self.tolerance:get()
+    ::tolerance_continue::
+
     local args = { ... }
     for i = 1, #args do
         stack:push(args[i])
     end
-    return interpret(self, program, INSTRUCTIONS, env, stack, 2)
+    return interpret(self, program, INSTRUCTIONS, env, stack)
 end
 
 function Patternizer:restrict(program)
@@ -866,7 +931,7 @@ function Patternizer:restrict(program)
         pc = program.restrict,
         sides = sides,
         hsides = sides * 0.5,
-    }, RuntimeStack:new(), 2) ~= 0
+    }, RuntimeStack:new()) ~= 0
 end
 
 -- Directly interprets a string.
@@ -930,6 +995,7 @@ function Patternizer:spawn()
     end
 end
 
+-- Appends a single program to the program pool
 function Patternizer:add_program(program)
     if not Filter.TABLE(program) then
         errorf(2, "AddProgram", "Argument #1 is not a table")
@@ -937,6 +1003,13 @@ function Patternizer:add_program(program)
     local n = self.pattern.total + 1
     self.pattern.list[n] = program
     self.pattern.total = n
+end
+
+-- Replaces the pattern pool
+function Patternizer:set_program_pool(program_list)
+    self.pattern.list = program_list
+    self.pattern.total = #program_list
+    self.pattern.previous = nil
 end
 
 -- ! Depreciated functions
@@ -983,22 +1056,19 @@ function Patternizer:pspawn()
     self:spawn()
 end
 
--- ! Deprecated
--- Runs the patternizer timeline without spawning patterns
-function Patternizer:step(mFrameTime)
-    self.timeline:update(mFrameTime)
-end
-
 --#endregion
 
 -- Removes all patterns
 function Patternizer:clear()
-    for i = 1, self.pattern.total do
-        self.pattern.list[i] = nil
-    end
-    self.pattern.total = 0
-    self.pattern.previous = nil
+    self.set_program_pool({})
 end
+
+-- Runs the patternizer timeline without spawning patterns
+function Patternizer:run_timeline(mFrameTime)
+    self.timeline:update(mFrameTime)
+end
+-- ! Deprecated
+Patternizer.step = Patternizer.run_timeline
 
 -- Runs the patternizer
 function Patternizer:run(mFrameTime)
