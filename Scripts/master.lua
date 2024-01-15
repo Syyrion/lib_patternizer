@@ -586,7 +586,7 @@ end
 local function decode(dir, pattern)
     local data, init, plen = {}, 1, pattern:len()
     repeat
-        local _, last, nonloop, loop, div = pattern:find("([%w%._]*)|?([%w%._]*)([%+%-]?)", init)
+        local _, last, nonloop, loop, div = pattern:find("([%w%._]*)|?([%w%._]*)([%+%-/]?)", init)
         table.insert(data, {
             nl = nonloop,
             l = loop:len() > 0 and loop or nil,
@@ -600,7 +600,7 @@ local function decode(dir, pattern)
 end
 
 function Patternizer:strwall(str, pos, th)
-    local dir, pattern = str:match("^(~?)([%w%._|%+%-]-)$")
+    local dir, pattern = str:match("^(~?)([%w%._|%+%-/]-)$")
     if not dir then
         errorf(3, "WallString", "Invalid pattern.", ix, ins)
     end
@@ -775,7 +775,7 @@ function Patternizer.compile(source)
             local chars
             instruction, chars = instruction:match("^([^:]+:?)(.-)$")
             if instruction == "h:" or instruction == "t:" or instruction == "p:" then
-                local dir, pattern = chars:match("^(~?)([%w%._|%+%-]-)$")
+                local dir, pattern = chars:match("^(~?)([%w%._|%+%-/]-)$")
                 if not dir then
                     errorf(3, "Compilation", 'Invalid pattern at instruction %d, "%s".', address, instruction)
                 end
@@ -822,7 +822,7 @@ end
     * Interpreters
 ]]
 
-local INSTRUCTION_LIMIT = 99999999
+local INSTRUCTION_LIMIT = 9999999
 
 local function interpret(self, program, instruction_set, env, stack)
     for _ = 1, INSTRUCTION_LIMIT do
