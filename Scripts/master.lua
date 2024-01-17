@@ -774,7 +774,13 @@ function Patternizer.compile(source)
         else
             local chars
             instruction, chars = instruction:match("^([^:]+:?)(.-)$")
-            if instruction == "h:" or instruction == "t:" or instruction == "p:" then
+            if
+                instruction == "t:"
+                or instruction == "p:"
+                or instruction == "T:"
+                or instruction == "P:"
+                or instruction == "h:"
+            then
                 local dir, pattern = chars:match("^(~?)([%w%._|%+%-/]-)$")
                 if not dir then
                     errorf(3, "Compilation", 'Invalid pattern at instruction %d, "%s".', address, instruction)
