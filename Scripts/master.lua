@@ -366,7 +366,7 @@ local INSTRUCTIONS = {
         if depth == 0 or depth == 1 or times == 0 then
             return
         end
-        depth = depth % stack.sp
+        depth = depth % stack.stack.sp
         local buffer = {}
         for i = depth - 1, 0, -1 do
             buffer[i] = stack:pop()
