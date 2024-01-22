@@ -353,7 +353,7 @@ local INSTRUCTIONS = {
         stack:push(stack:peek(depth))
     end,
     ["clone"] = function(stack)
-        local size = stack.sp - 1
+        local size = stack.stack.sp - 1
         for i = 1, size do
             stack:push(stack:peek(size - 1))
         end
