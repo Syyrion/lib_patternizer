@@ -345,6 +345,16 @@ local INSTRUCTIONS = {
         stack:push(a)
         stack:push(b)
     end,
+    ["exch"] = function(stack)
+        local depth = stack:pop()
+        -- Exchanging an entry with itself does nothing
+        if depth == 0 then
+            return
+        end
+        local stack2 = stack.stack
+        local top, second = stack2.sp - 1, stack2.sp - 1 - depth
+        stack2.list[second], stack2.list[top] = stack2.list[top], stack2.list[second]
+    end,
     ["over"] = function(stack)
         stack:push(stack:peek(1))
     end,
@@ -358,7 +368,6 @@ local INSTRUCTIONS = {
             stack:push(stack:peek(size - 1))
         end
     end,
-
     ["roll"] = function(stack)
         local times = stack:pop()
         local depth = stack:pop()
