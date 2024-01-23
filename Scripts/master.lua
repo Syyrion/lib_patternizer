@@ -351,8 +351,14 @@ local INSTRUCTIONS = {
         if depth == 0 then
             return
         end
-        local stack2 = stack.stack
-        local top, second = stack2.sp - 1, stack2.sp - 1 - depth
+        local stack2 = stack.stack        
+        local top, second = stack2.sp, stack2.sp - depth
+        local scope = stack.scope_stack:peek()
+        if top <= scope or second <= scope then
+            errorf(0, "Runtime", "Unable to modify stack snapshot after function statement has begun (bad pop).")
+        end
+        top = top - 1
+        second = second - 1
         stack2.list[second], stack2.list[top] = stack2.list[top], stack2.list[second]
     end,
     ["over"] = function(stack)
