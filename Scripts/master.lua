@@ -84,7 +84,7 @@ end
 -- Functions to be linked must have the form: function (side, thickness) end
 -- Doubles as the table for links
 function Patternizer.link.__call(_, self, char, fn)
-    if not (Filter.FUNCTION(fn) and Filter.USERDATA(fn)) then
+    if not (Filter.FUNCTION(fn) or Filter.USERDATA(fn)) then
         errorf(2, "Link", "Argument #2 is not a function.")
     end
     if not (Filter.STRING(char) and char:match("^([%w%._])$")) then
@@ -582,7 +582,7 @@ INSTRUCTIONS["h:"] = INSTRUCTIONS["T:"]
 setmetatable(INSTRUCTIONS, { __index = BASIC_INSTRUCTIONS })
 
 function Patternizer:include(name, fn)
-    if not (Filter.FUNCTION(fn) and Filter.USERDATA(fn)) then
+    if not (Filter.FUNCTION(fn) or Filter.USERDATA(fn)) then
         errorf(2, "Include", "Argument #1 is not a function.")
     end
     if not Filter.STRING(name) then
