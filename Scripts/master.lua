@@ -151,7 +151,7 @@ function RuntimeStack:new()
         stack = Stack:new(),
         scope_stack = Stack:new(),
     }
-    newinst.scope_stack:push(0)
+    newinst.scope_stack:push(1)
     return setmetatable(newinst, self)
 end
 
@@ -159,10 +159,17 @@ function RuntimeStack:push(n)
     self.stack:push(n)
 end
 
-function RuntimeStack:pop()
-    if self.stack.sp == self.scope_stack:peek() then
+function RuntimeStack:check_scope(sp)
+    if sp <= self.scope_stack:peek() then
+        if self.scope_stack.sp == 2 then
+            errorf(0, "Stack", "Stack underflow (bad pop).")
+        end
         errorf(0, "Runtime", "Unable to modify stack snapshot after function statement has begun (bad pop).")
     end
+end
+
+function RuntimeStack:pop()
+    self:check_scope(self.stack.sp)
     return self.stack:pop()
 end
 
@@ -353,10 +360,8 @@ local INSTRUCTIONS = {
         end
         local stack2 = stack.stack        
         local top, second = stack2.sp, stack2.sp - depth
-        local scope = stack.scope_stack:peek()
-        if top <= scope or second <= scope then
-            errorf(0, "Runtime", "Unable to modify stack snapshot after function statement has begun (bad pop).")
-        end
+        stack:check_scope(top)
+        stack:check_scope(second)
         top = top - 1
         second = second - 1
         stack2.list[second], stack2.list[top] = stack2.list[top], stack2.list[second]
