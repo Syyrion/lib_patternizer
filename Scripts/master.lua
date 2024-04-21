@@ -889,21 +889,6 @@ function Patternizer:interpret(program, ...)
         rof = 0,
     }
 
-    if program.abs then
-        local abs = interpret(nil, program, BASIC_INSTRUCTIONS, {
-            pc = program.abs,
-            sides = sides,
-            hsides = sides * 0.5,
-        }, RuntimeStack:new())
-
-        if abs then
-            env.abs = math.floor(abs % sides)
-            goto abs_continue
-        end
-    end
-    env.abs = self.randsideinit:get() and u_rndInt(0, sides - 1) or 0
-    ::abs_continue::
-
     if program.mirror then
         local mirror = interpret(nil, program, BASIC_INSTRUCTIONS, {
             pc = program.mirror,
@@ -922,6 +907,21 @@ function Patternizer:interpret(program, ...)
     end
     env.mirror = self.mirroring:get() and getRandomDir() or 1
     ::mirror_continue::
+
+    if program.abs then
+        local abs = interpret(nil, program, BASIC_INSTRUCTIONS, {
+            pc = program.abs,
+            sides = sides,
+            hsides = sides * 0.5,
+        }, RuntimeStack:new())
+
+        if abs then
+            env.abs = math.floor((abs * env.mirror) % sides)
+            goto abs_continue
+        end
+    end
+    env.abs = self.randsideinit:get() and u_rndInt(0, sides - 1) or 0
+    ::abs_continue::
 
     if program.tolerance then
         local tolerance = interpret(nil, program, BASIC_INSTRUCTIONS, {
